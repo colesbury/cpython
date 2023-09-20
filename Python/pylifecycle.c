@@ -687,6 +687,11 @@ pycore_init_global_objects(PyInterpreterState *interp)
         return status;
     }
 
+    status = _PyModule_InitGlobalObjects(interp);
+    if (_PyStatus_EXCEPTION(status)) {
+        return status;
+    }
+
     _PyUnicode_InitState(interp);
 
     return _PyStatus_OK();
@@ -1708,6 +1713,7 @@ finalize_interp_types(PyInterpreterState *interp)
 
     _PySlice_Fini(interp);
 
+    _PyModule_Fini(interp);
     _PyUnicode_Fini(interp);
     _PyFloat_Fini(interp);
 #ifdef Py_DEBUG

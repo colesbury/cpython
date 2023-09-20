@@ -357,6 +357,16 @@ extern "C" {
 
 #include "exports.h"
 
+
+// _Py_ATTRIBUTE_WEAK
+#if defined(__APPLE__)
+#define _Py_ATTRIBUTE_WEAK __attribute__((weak_import))
+#elif defined(__GNUC__)
+#define _Py_ATTRIBUTE_WEAK __attribute__((weak))
+#else
+#define _Py_ATTRIBUTE_WEAK
+#endif
+
 /* limits.h constants that may be missing */
 
 #ifndef INT_MAX

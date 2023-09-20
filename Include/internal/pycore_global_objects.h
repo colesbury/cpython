@@ -32,6 +32,7 @@ extern "C" {
 struct _Py_cached_objects {
     // XXX We could statically allocate the hashtable.
     _Py_hashtable_t *interned_strings;
+    _Py_hashtable_t *moduledef_objects;
 };
 
 struct _Py_static_objects {

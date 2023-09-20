@@ -1398,7 +1398,7 @@ create_builtin(PyThreadState *tstate, PyObject *name, PyObject *spec)
             }
 
             if (PyObject_TypeCheck(mod, &PyModuleDef_Type)) {
-                return PyModule_FromDefAndSpec((PyModuleDef*)mod, spec);
+                return PyModule_FromDefAndSpec(_PyModuleDefObject_GetDef(mod), spec);
             }
             else {
                 /* Remember pointer to module init function. */

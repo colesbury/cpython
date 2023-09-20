@@ -1611,6 +1611,7 @@ regen-typeslots:
 
 PYTHON_HEADERS= \
 		$(srcdir)/Include/Python.h \
+		$(srcdir)/Include/abi4_compat.h \
 		$(srcdir)/Include/abstract.h \
 		$(srcdir)/Include/bltinmodule.h \
 		$(srcdir)/Include/boolobject.h \

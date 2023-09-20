@@ -16,6 +16,7 @@ typedef struct PyGetSetDef PyGetSetDef;
 typedef struct PyMemberDef PyMemberDef;
 
 typedef struct _object PyObject;
+typedef struct _varobject PyVarObject;
 typedef struct _longobject PyLongObject;
 typedef struct _typeobject PyTypeObject;
 typedef struct PyCodeObject PyCodeObject;

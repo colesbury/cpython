@@ -14,6 +14,9 @@ extern int _PyModuleSpec_IsInitializing(PyObject *);
 
 extern int _PyModule_IsExtension(PyObject *obj);
 
+extern PyStatus _PyModule_InitGlobalObjects(PyInterpreterState *);
+extern void _PyModule_Fini(PyInterpreterState *);
+
 typedef struct {
     PyObject_HEAD
     PyObject *md_dict;
@@ -23,6 +26,16 @@ typedef struct {
     // for logging purposes after md_dict is cleared
     PyObject *md_name;
 } PyModuleObject;
+
+#ifdef Py_NOGIL
+// Wrapper around PyModule_Def for PyModuleDef_Init
+typedef struct {
+    PyObject_HEAD
+    PyModuleDef *def;
+} PyModuleDefObject;
+#else
+typedef PyModuleDef PyModuleDefObject;
+#endif
 
 static inline PyModuleDef* _PyModule_GetDef(PyObject *mod) {
     assert(PyModule_Check(mod));
@@ -40,6 +53,16 @@ static inline PyObject* _PyModule_GetDict(PyObject *mod) {
     // _PyModule_GetDict(mod) must not be used after calling module_clear(mod)
     assert(dict != NULL);
     return dict;  // borrowed reference
+}
+
+static inline PyModuleDef* _PyModuleDefObject_GetDef(PyObject *obj)
+{
+    assert(Py_IS_TYPE(obj, &PyModuleDef_Type));
+#ifdef Py_NOGIL
+    return ((PyModuleDefObject *)obj)->def;
+#else
+    return (PyModuleDef *)obj;
+#endif
 }
 
 PyObject* _Py_module_getattro_impl(PyModuleObject *m, PyObject *name, int suppress);

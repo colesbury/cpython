@@ -3,6 +3,7 @@
 
 #include "Python.h"
 #include "pycore_call.h"          // _PyObject_CallNoArgs()
+#include "pycore_initconfig.h"    // _PyStatus_OK()
 #include "pycore_interp.h"        // PyInterpreterState.importlib
 #include "pycore_modsupport.h"    // _PyModule_CreateInitialized()
 #include "pycore_moduleobject.h"  // _PyModule_GetDef()
@@ -21,7 +22,7 @@ static PyMemberDef module_members[] = {
 PyTypeObject PyModuleDef_Type = {
     PyVarObject_HEAD_INIT(&PyType_Type, 0)
     "moduledef",                                /* tp_name */
-    sizeof(PyModuleDef),                        /* tp_basicsize */
+    sizeof(PyModuleDefObject),                  /* tp_basicsize */
     0,                                          /* tp_itemsize */
 };
 
@@ -43,12 +44,33 @@ PyObject*
 PyModuleDef_Init(PyModuleDef* def)
 {
     assert(PyModuleDef_Type.tp_flags & Py_TPFLAGS_READY);
+#ifndef Py_NOGIL
     if (def->m_base.m_index == 0) {
         Py_SET_REFCNT(def, 1);
         Py_SET_TYPE(def, &PyModuleDef_Type);
         def->m_base.m_index = _PyImport_GetNextModuleIndex();
     }
     return (PyObject*)def;
+#else
+    // TOOD: thread-safety
+    _Py_hashtable_t *table = _PyRuntime.cached_objects.moduledef_objects;
+    PyModuleDefObject *wrapper = _Py_hashtable_get(table, def);
+    if (wrapper == NULL) {
+        if (def->m_base.m_index == 0) {
+            def->m_base.m_index = _PyImport_GetNextModuleIndex();
+        }
+        wrapper = PyObject_New(PyModuleDefObject, &PyModuleDef_Type);
+        if (wrapper == NULL) {
+            return NULL;
+        }
+        wrapper->def = def;
+        if (_Py_hashtable_set(table, def, wrapper) < 0) {
+            Py_DECREF(wrapper);
+            return PyErr_NoMemory();
+        }
+    }
+    return (PyObject *)wrapper;
+#endif
 }
 
 static int
@@ -792,6 +814,37 @@ _PyModuleSpec_IsUninitializedSubmodule(PyObject *spec, PyObject *name)
     }
     return is_uninitialized;
 }
+
+PyStatus
+_PyModule_InitGlobalObjects(PyInterpreterState *interp)
+{
+    // Initialize the global module def hashtable
+    if (_Py_IsMainInterpreter(interp)) {
+        _Py_hashtable_allocator_t hashtable_alloc = {PyMem_RawMalloc, PyMem_RawFree};
+        _Py_hashtable_t *table = _Py_hashtable_new_full(
+            &_Py_hashtable_hash_ptr,
+            &_Py_hashtable_compare_direct,
+            NULL,
+            (_Py_hashtable_destroy_func)&Py_DecRef,
+            &hashtable_alloc
+        );
+        if (table == NULL) {
+            return _PyStatus_NO_MEMORY();
+        }
+        interp->runtime->cached_objects.moduledef_objects = table;
+    }
+    return _PyStatus_OK();
+}
+
+void _PyModule_Fini(PyInterpreterState *interp)
+{
+    if (_Py_IsMainInterpreter(interp)) {
+        _Py_hashtable_t *table = interp->runtime->cached_objects.moduledef_objects;
+        interp->runtime->cached_objects.moduledef_objects = NULL;
+        _Py_hashtable_destroy(table);
+    }
+}
+
 
 PyObject*
 _Py_module_getattro_impl(PyModuleObject *m, PyObject *name, int suppress)

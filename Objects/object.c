@@ -299,6 +299,50 @@ _Py_DecRef(PyObject *o)
     Py_DECREF(o);
 }
 
+PyAPI_FUNC(PyTypeObject *) Py_Type(PyObject *o);
+
+PyTypeObject *
+Py_Type(PyObject *o)
+{
+    return Py_TYPE(o);
+}
+
+void
+Py_SetType(PyObject *o, PyTypeObject *type)
+{
+    Py_SET_TYPE(o, type);
+}
+
+Py_ssize_t
+Py_Refcnt(PyObject *o)
+{
+    return Py_REFCNT(o);
+}
+
+void
+Py_SetRefcnt(PyObject *o, Py_ssize_t refcnt)
+{
+    Py_SET_REFCNT(o, refcnt);
+}
+
+Py_ssize_t
+PyVarObject_Size(PyObject *o)
+{
+    return Py_SIZE(o);
+}
+
+void
+PyVarObject_SetSize(PyObject *o, Py_ssize_t size)
+{
+    Py_SET_SIZE(o, size);
+}
+
+int
+Py_IsImmortal(PyObject *o)
+{
+    return _Py_IsImmortal(o);
+}
+
 
 /**************************************/
 

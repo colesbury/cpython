@@ -37,7 +37,7 @@ PyAPI_DATA(PyTypeObject) PyModuleDef_Type;
 #endif
 
 typedef struct PyModuleDef_Base {
-  PyObject_HEAD
+  struct { Py_ssize_t _private1; PyTypeObject *_private2; } ob_base;
   /* The function used to re-initialize the module.
      This is only set for legacy (single-phase init) extension modules
      and only used for those that support multiple initializations
@@ -58,7 +58,7 @@ typedef struct PyModuleDef_Base {
 } PyModuleDef_Base;
 
 #define PyModuleDef_HEAD_INIT {  \
-    PyObject_HEAD_INIT(_Py_NULL) \
+    { 0 },                       \
     _Py_NULL, /* m_init */       \
     0,        /* m_index */      \
     _Py_NULL, /* m_copy */       \

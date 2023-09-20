@@ -200,7 +200,7 @@ _PyImport_LoadDynamicModuleWithSpec(PyObject *spec, FILE *fp)
         Py_DECREF(name_unicode);
         Py_DECREF(name);
         Py_DECREF(path);
-        return PyModule_FromDefAndSpec((PyModuleDef*)m, spec);
+        return PyModule_FromDefAndSpec(_PyModuleDefObject_GetDef(m), spec);
     }
 
     /* Fall back to single-phase init mechanism */

@@ -56,8 +56,20 @@ whose size is determined when the object is allocated.
 #  define Py_REF_DEBUG
 #endif
 
+#if defined(Py_ABI_VERSION_4) && !defined(Py_LIMITED_API)
+#error "Py_ABI_VERSION_4 must not be defined unless Py_LIMITED_API is defined"
+#endif
+
+#if defined(Py_ABI_VERSION_4) && Py_LIMITED_API+0<0x03070000
+#error "Py_ABI_VERSION_4 requires Py_LIMITED_API>=0x03070000"
+#endif
+
 /* PyObject_HEAD defines the initial segment of every PyObject. */
+#if defined(Py_ABI_VERSION_4)
+#define PyObject_HEAD                   struct { uint32_t _padding0[2]; uintptr_t _padding1[3]; } ob_base;
+#else
 #define PyObject_HEAD                   PyObject ob_base;
+#endif
 
 /*
 Immortalization:
@@ -142,6 +154,11 @@ check by comparing the reference count field to the immortality reference count.
  * by hand.  Similarly every pointer to a variable-size Python object can,
  * in addition, be cast to PyVarObject*.
  */
+#if defined(Py_ABI_VERSION_4)
+struct _object {
+    PyObject_HEAD
+};
+#else
 struct _object {
 #if (defined(__GNUC__) || defined(__clang__)) \
         && !(defined __STDC_VERSION__ && __STDC_VERSION__ >= 201112L)
@@ -166,15 +183,17 @@ struct _object {
 
     PyTypeObject *ob_type;
 };
+#endif
 
 /* Cast argument to PyObject* type. */
 #define _PyObject_CAST(op) _Py_CAST(PyObject*, (op))
 
-typedef struct {
+#if !defined(Py_ABI_VERSION_4)
+struct _varobject {
     PyObject ob_base;
     Py_ssize_t ob_size; /* Number of items in variable part */
-} PyVarObject;
-
+} /* PyVarObject */;
+#endif
 /* Cast argument to PyVarObject* type. */
 #define _PyVarObject_CAST(op) _Py_CAST(PyVarObject*, (op))
 
@@ -183,9 +202,29 @@ typedef struct {
 PyAPI_FUNC(int) Py_Is(PyObject *x, PyObject *y);
 #define Py_Is(x, y) ((x) == (y))
 
+#if !defined(Py_LIMITED_API) || Py_LIMITED_API+0 >= 0x030d0000
+PyAPI_FUNC(PyTypeObject *) Py_Type(PyObject *o);
+PyAPI_FUNC(void) Py_SetType(PyObject *o, PyTypeObject *type);
+PyAPI_FUNC(Py_ssize_t) Py_Refcnt(PyObject *o);
+PyAPI_FUNC(void) Py_SetRefcnt(PyObject *o, Py_ssize_t refcnt);
+PyAPI_FUNC(Py_ssize_t) PyVarObject_Size(PyObject *o);
+PyAPI_FUNC(void) PyVarObject_SetSize(PyObject *o, Py_ssize_t size);
+PyAPI_FUNC(int) Py_IsImmortal(PyObject *o);
+#endif
+
+#if defined(Py_ABI_VERSION_4) && Py_LIMITED_API+0 < 0x030d0000
+#define Py_ABI4_COMPAT_H
+#include "abi4_compat.h"
+#endif
 
 static inline Py_ssize_t Py_REFCNT(PyObject *ob) {
+#if defined(Py_ABI_VERSION_4) && Py_LIMITED_API+0 < 0x030d0000
+    return _Py_Refcnt_ptr(ob);
+#elif !defined(Py_LIMITED_API) || Py_LIMITED_API+0 < 0x030d0000
     return ob->ob_refcnt;
+#else
+    return Py_Refcnt(ob);
+#endif
 }
 #if !defined(Py_LIMITED_API) || Py_LIMITED_API+0 < 0x030b0000
 #  define Py_REFCNT(ob) Py_REFCNT(_PyObject_CAST(ob))
@@ -194,7 +233,13 @@ static inline Py_ssize_t Py_REFCNT(PyObject *ob) {
 
 // bpo-39573: The Py_SET_TYPE() function must be used to set an object type.
 static inline PyTypeObject* Py_TYPE(PyObject *ob) {
+#if defined(Py_ABI_VERSION_4) && Py_LIMITED_API+0 < 0x030d0000
+    return _Py_type_ptr(ob);
+#elif !defined(Py_LIMITED_API) || Py_LIMITED_API+0 < 0x030d0000
     return ob->ob_type;
+#else
+    return ob->ob_type;
+#endif
 }
 #if !defined(Py_LIMITED_API) || Py_LIMITED_API+0 < 0x030b0000
 #  define Py_TYPE(ob) Py_TYPE(_PyObject_CAST(ob))
@@ -205,15 +250,22 @@ PyAPI_DATA(PyTypeObject) PyBool_Type;
 
 // bpo-39573: The Py_SET_SIZE() function must be used to set an object size.
 static inline Py_ssize_t Py_SIZE(PyObject *ob) {
+#if defined(Py_ABI_VERSION_4) && Py_LIMITED_API+0 < 0x030d0000
+    return _PyVarObject_Size_ptr(ob);
+#elif !defined(Py_LIMITED_API) || Py_LIMITED_API+0 < 0x030d0000
     assert(ob->ob_type != &PyLong_Type);
     assert(ob->ob_type != &PyBool_Type);
     PyVarObject *var_ob = _PyVarObject_CAST(ob);
     return var_ob->ob_size;
+#else
+    return PyVarObject_Size(ob);
+#endif
 }
 #if !defined(Py_LIMITED_API) || Py_LIMITED_API+0 < 0x030b0000
 #  define Py_SIZE(ob) Py_SIZE(_PyObject_CAST(ob))
 #endif
 
+#if !defined(Py_ABI_VERSION_4) && (!defined(Py_LIMITED_API) || Py_LIMITED_API+0 < 0x030d0000)
 static inline Py_ALWAYS_INLINE int _Py_IsImmortal(PyObject *op)
 {
 #if SIZEOF_VOID_P > 4
@@ -223,6 +275,7 @@ static inline Py_ALWAYS_INLINE int _Py_IsImmortal(PyObject *op)
 #endif
 }
 #define _Py_IsImmortal(op) _Py_IsImmortal(_PyObject_CAST(op))
+#endif
 
 static inline int Py_IS_TYPE(PyObject *ob, PyTypeObject *type) {
     return Py_TYPE(ob) == type;
@@ -232,7 +285,11 @@ static inline int Py_IS_TYPE(PyObject *ob, PyTypeObject *type) {
 #endif
 
 
+#if (!defined(Py_LIMITED_API) || Py_LIMITED_API+0 < 0x030d0000) && !defined(Py_ABI_VERSION_4)
 static inline void Py_SET_REFCNT(PyObject *ob, Py_ssize_t refcnt) {
+#if defined(Py_ABI_VERSION_4) && Py_LIMITED_API+0 < 0x030d0000
+    _Py_SetRefcnt_ptr(ob, refcnt);
+#elif !defined(Py_LIMITED_API) || Py_LIMITED_API+0 < 0x030d0000
     // This immortal check is for code that is unaware of immortal objects.
     // The runtime tracks these objects and we should avoid as much
     // as possible having extensions inadvertently change the refcnt
@@ -241,23 +298,39 @@ static inline void Py_SET_REFCNT(PyObject *ob, Py_ssize_t refcnt) {
         return;
     }
     ob->ob_refcnt = refcnt;
+#else
+    _Py_SetRefcnt(ob, refcnt);
+#endif
 }
 #if !defined(Py_LIMITED_API) || Py_LIMITED_API+0 < 0x030b0000
 #  define Py_SET_REFCNT(ob, refcnt) Py_SET_REFCNT(_PyObject_CAST(ob), (refcnt))
 #endif
+#endif
 
 
 static inline void Py_SET_TYPE(PyObject *ob, PyTypeObject *type) {
+#if defined(Py_ABI_VERSION_4) && Py_LIMITED_API+0 < 0x030d0000
+    _Py_SetType_ptr(ob, type);
+#elif !defined(Py_LIMITED_API) || Py_LIMITED_API+0 < 0x030d0000
     ob->ob_type = type;
+#else
+    Py_SetType(ob, type);
+#endif
 }
 #if !defined(Py_LIMITED_API) || Py_LIMITED_API+0 < 0x030b0000
 #  define Py_SET_TYPE(ob, type) Py_SET_TYPE(_PyObject_CAST(ob), type)
 #endif
 
 static inline void Py_SET_SIZE(PyVarObject *ob, Py_ssize_t size) {
+#if defined(Py_ABI_VERSION_4) && Py_LIMITED_API+0 < 0x030d0000
+    _PyVarObject_SetSize_ptr(_PyObject_CAST(ob), size);
+#elif !defined(Py_LIMITED_API) || Py_LIMITED_API+0 < 0x030d0000
     assert(ob->ob_base.ob_type != &PyLong_Type);
     assert(ob->ob_base.ob_type != &PyBool_Type);
     ob->ob_size = size;
+#else
+    PyVarObject_SetSize(_PyObject_CAST(ob), size);
+#endif
 }
 #if !defined(Py_LIMITED_API) || Py_LIMITED_API+0 < 0x030b0000
 #  define Py_SET_SIZE(ob, size) Py_SET_SIZE(_PyVarObject_CAST(ob), (size))
@@ -605,7 +678,7 @@ PyAPI_FUNC(void) _Py_DecRef(PyObject *);
 
 static inline Py_ALWAYS_INLINE void Py_INCREF(PyObject *op)
 {
-#if defined(Py_LIMITED_API) && (Py_LIMITED_API+0 >= 0x030c0000 || defined(Py_REF_DEBUG))
+#if defined(Py_LIMITED_API) && (Py_LIMITED_API+0 >= 0x030c0000 || defined(Py_REF_DEBUG) || defined(Py_ABI_VERSION_4))
     // Stable ABI implements Py_INCREF() as a function call on limited C API
     // version 3.12 and newer, and on Python built in debug mode. _Py_IncRef()
     // was added to Python 3.10.0a7, use Py_IncRef() on older Python versions.
@@ -643,7 +716,7 @@ static inline Py_ALWAYS_INLINE void Py_INCREF(PyObject *op)
 #  define Py_INCREF(op) Py_INCREF(_PyObject_CAST(op))
 #endif
 
-#if defined(Py_LIMITED_API) && (Py_LIMITED_API+0 >= 0x030c0000 || defined(Py_REF_DEBUG))
+#if defined(Py_LIMITED_API) && (Py_LIMITED_API+0 >= 0x030c0000 || defined(Py_REF_DEBUG) || defined(Py_ABI_VERSION_4))
 // Stable ABI implements Py_DECREF() as a function call on limited C API
 // version 3.12 and newer, and on Python built in debug mode. _Py_DecRef() was
 // added to Python 3.10.0a7, use Py_DecRef() on older Python versions.
@@ -827,7 +900,11 @@ PyAPI_FUNC(int) Py_IsNone(PyObject *x);
 #define Py_IsNone(x) Py_Is((x), Py_None)
 
 /* Macro for returning Py_None from a function */
+#if !defined(Py_LIMITED_API) || Py_LIMITED_API+0 >= 0x030d0000
 #define Py_RETURN_NONE return Py_None
+#else
+#define Py_RETURN_NONE return Py_NewRef(Py_None)
+#endif
 
 /*
 Py_NotImplemented is a singleton used to signal that an operation is
@@ -837,7 +914,11 @@ PyAPI_DATA(PyObject) _Py_NotImplementedStruct; /* Don't use this directly */
 #define Py_NotImplemented (&_Py_NotImplementedStruct)
 
 /* Macro for returning Py_NotImplemented from a function */
+#if !defined(Py_LIMITED_API) || Py_LIMITED_API+0 >= 0x030d0000
 #define Py_RETURN_NOTIMPLEMENTED return Py_NotImplemented
+#else
+#define Py_RETURN_NOTIMPLEMENTED return Py_NewRef(Py_NotImplemented)
+#endif
 
 /* Rich comparison opcodes */
 #define Py_LT 0
