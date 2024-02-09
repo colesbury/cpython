@@ -22,6 +22,7 @@ typedef struct _PyThreadStateImpl {
     PyThreadState base;
 
     struct _qsbr_thread_state *qsbr;  // only used by free-threaded build
+    struct llist_node mem_free_queue; // delayed free queue
 
 #ifdef Py_GIL_DISABLED
     struct _mimalloc_thread_state mimalloc;

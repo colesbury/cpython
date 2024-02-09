@@ -176,6 +176,7 @@ extern PyTypeObject _PyExc_MemoryError;
         .object_state = _py_object_state_INIT(INTERP), \
         .dtoa = _dtoa_state_INIT(&(INTERP)), \
         .dict_state = _dict_state_INIT, \
+        .mem_free_queue = _Py_mem_free_queue_INIT(INTERP.mem_free_queue), \
         .func_state = { \
             .next_version = 1, \
         }, \

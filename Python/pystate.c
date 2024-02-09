@@ -614,6 +614,7 @@ init_interpreter(PyInterpreterState *interp,
 #ifdef Py_GIL_DISABLED
     _Py_brc_init_state(interp);
 #endif
+    llist_init(&interp->mem_free_queue.head);
     for (int i = 0; i < _PY_MONITORING_UNGROUPED_EVENTS; i++) {
         interp->monitors.tools[i] = 0;
     }
@@ -1345,6 +1346,7 @@ init_threadstate(_PyThreadStateImpl *_tstate,
     // Initialize biased reference counting inter-thread queue
     _Py_brc_init_thread(tstate);
 #endif
+    llist_init(&_tstate->mem_free_queue);
 
     if (interp->stoptheworld.requested || _PyRuntime.stoptheworld.requested) {
         // Start in the suspended state if there is an ongoing stop-the-world.
@@ -1563,6 +1565,7 @@ PyThreadState_Clear(PyThreadState *tstate)
         // don't call _PyInterpreterState_SetNotRunningMain() yet.
         tstate->on_delete(tstate->on_delete_data);
     }
+
 #ifdef Py_GIL_DISABLED
     // Each thread should clear own freelists in free-threading builds.
     _PyFreeListState *freelist_state = _PyFreeListState_GET();
@@ -1571,6 +1574,9 @@ PyThreadState_Clear(PyThreadState *tstate)
     // Remove ourself from the biased reference counting table of threads.
     _Py_brc_remove_thread(tstate);
 #endif
+
+    // Merge our queue of pointers to be freed into the interpreter queue.
+    _PyMem_AbandonDelayed(tstate);
 
     _PyThreadState_ClearMimallocHeaps(tstate);
 
