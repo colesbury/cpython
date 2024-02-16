@@ -23,6 +23,8 @@
 #  define static_assert _Static_assert
 #endif
 
+#define Py_CRITICAL_SECTION_DEBUG 1
+
 /* Minimum value between x and y */
 #define Py_MIN(x, y) (((x) > (y)) ? (y) : (x))
 

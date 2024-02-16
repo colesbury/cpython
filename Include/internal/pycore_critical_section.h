@@ -78,6 +78,8 @@ extern "C" {
 //  ...
 //  Py_END_CRITICAL_SECTION2();
 
+#define Py_CRITICAL_SECTION_DEBUG 1
+
 
 // Tagged pointers to critical sections use the two least significant bits to
 // mark if the pointed-to critical section is inactive and whether it is a
@@ -86,10 +88,21 @@ extern "C" {
 #define _Py_CRITICAL_SECTION_TWO_MUTEXES    0x2
 #define _Py_CRITICAL_SECTION_MASK           0x3
 
+#ifdef Py_CRITICAL_SECTION_DEBUG
+# define Py_CRITICAL_SECTION_RECORD_DEBUG(cs)   \
+    do {                                        \
+        cs.filename = __FILE__;                 \
+        cs.lineno = __LINE__;                   \
+    } while (0)
+#else
+# define Py_CRITICAL_SECTION_RECORD_DEBUG(cs)
+#endif
+
 #ifdef Py_GIL_DISABLED
 # define Py_BEGIN_CRITICAL_SECTION(op)                                  \
     {                                                                   \
         _PyCriticalSection _cs;                                         \
+        Py_CRITICAL_SECTION_RECORD_DEBUG(_cs);                          \
         _PyCriticalSection_Begin(&_cs, &_PyObject_CAST(op)->ob_mutex)
 
 # define Py_END_CRITICAL_SECTION()                                      \
@@ -99,6 +112,7 @@ extern "C" {
 # define Py_XBEGIN_CRITICAL_SECTION(op)                                 \
     {                                                                   \
         _PyCriticalSection _cs_opt = {0};                               \
+        Py_CRITICAL_SECTION_RECORD_DEBUG(_cs_opt);                      \
         _PyCriticalSection_XBegin(&_cs_opt, _PyObject_CAST(op))
 
 # define Py_XEND_CRITICAL_SECTION()                                     \
@@ -108,6 +122,7 @@ extern "C" {
 # define Py_BEGIN_CRITICAL_SECTION2(a, b)                               \
     {                                                                   \
         _PyCriticalSection2 _cs2;                                       \
+        Py_CRITICAL_SECTION_RECORD_DEBUG(_cs2.base);                    \
         _PyCriticalSection2_Begin(&_cs2, &_PyObject_CAST(a)->ob_mutex, &_PyObject_CAST(b)->ob_mutex)
 
 # define Py_END_CRITICAL_SECTION2()                                     \
@@ -156,6 +171,11 @@ typedef struct {
 
     // Mutex used to protect critical section
     PyMutex *mutex;
+
+#ifdef Py_CRITICAL_SECTION_DEBUG
+    const char *filename;
+    int lineno;
+#endif
 } _PyCriticalSection;
 
 // A critical section protected by two mutexes. Use

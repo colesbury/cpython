@@ -64,6 +64,7 @@ class object "PyObject *" "&PyBaseObject_Type"
 #define BEGIN_TYPE_LOCK()                                               \
     {                                                                   \
         _PyCriticalSection _cs;                                         \
+        Py_CRITICAL_SECTION_RECORD_DEBUG(_cs);                          \
         _PyCriticalSection_Begin(&_cs, TYPE_LOCK);                      \
 
 #define END_TYPE_LOCK()                                                 \
