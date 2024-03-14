@@ -898,6 +898,7 @@ setup_context(Py_ssize_t stack_level,
         globals = interp->sysdict;
         *filename = PyUnicode_FromString("sys");
         *lineno = 1;
+        // noop
     }
     else {
         globals = f->f_frame->f_globals;
