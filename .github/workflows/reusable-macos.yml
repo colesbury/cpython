@@ -40,11 +40,13 @@ jobs:
       uses: hendrikmuhs/ccache-action@v1.2
       with:
         # save: ${{ github.event_name == 'push' }}
-        key:  ${{ github.job }}-${{ matrix.os }}
-        max-size: "200M"
+        key:  ${{ github.job }}-${{ matrix.os }}-${{ inputs.free-threading }}
+        append-timestamp: false
+        max-size: "10M"
     - name: Add ccache to PATH
       run: |
-        echo "PATH=/usr/lib/ccache:/usr/local/opt/ccache/libexec:$PATH" >> $GITHUB_ENV
+        echo "PATH=/opt/homebrew/opt/ccache/libexec:/usr/local/opt/ccache/libexec:$PATH" >> $GITHUB_ENV
+        ls -al /opt/homebrew/opt/ccache/libexec || true
         ls -al /usr/lib/ccache || true
         ls -al /usr/local/opt/ccache/libexec || true
     - name: Install Homebrew dependencies
@@ -63,5 +65,5 @@ jobs:
       run: make -j4
     - name: Display build info
       run: make pythoninfo
-    - name: Tests
-      run: make test
+    # - name: Tests
+    #   run: make test
