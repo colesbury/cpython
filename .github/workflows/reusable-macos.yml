@@ -42,7 +42,7 @@ jobs:
         # save: ${{ github.event_name == 'push' }}
         key:  ${{ github.job }}-${{ matrix.os }}-${{ inputs.free-threading }}
         append-timestamp: false
-        max-size: "10M"
+        max-size: "50M"
     - name: Add ccache to PATH
       run: |
         echo "PATH=/opt/homebrew/opt/ccache/libexec:/usr/local/opt/ccache/libexec:$PATH" >> $GITHUB_ENV
