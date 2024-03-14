@@ -36,6 +36,17 @@ jobs:
       with:
         path: config.cache
         key: ${{ github.job }}-${{ matrix.os }}-${{ env.IMAGE_VERSION }}-${{ inputs.config_hash }}
+    - name: Configure ccache action
+      uses: hendrikmuhs/ccache-action@v1.2
+      with:
+        # save: ${{ github.event_name == 'push' }}
+        key:  ${{ github.job }}-${{ matrix.os }}
+        max-size: "200M"
+    - name: Add ccache to PATH
+      run: |
+        echo "PATH=/usr/lib/ccache:/usr/local/opt/ccache/libexec:$PATH" >> $GITHUB_ENV
+        ls -al /usr/lib/ccache || true
+        ls -al /usr/local/opt/ccache/libexec || true
     - name: Install Homebrew dependencies
       run: brew install pkg-config openssl@3.0 xz gdbm tcl-tk
     - name: Configure CPython
