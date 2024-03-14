@@ -41,7 +41,6 @@ jobs:
       with:
         # save: ${{ github.event_name == 'push' }}
         key:  ${{ github.job }}-${{ matrix.os }}-${{ inputs.free-threading }}
-        append-timestamp: false
         max-size: "50M"
     - name: Add ccache to PATH
       run: |
@@ -61,6 +60,7 @@ jobs:
           ${{ inputs.free-threading && '--disable-gil' || '' }} \
           --prefix=/opt/python-dev \
           --with-openssl="$(brew --prefix openssl@3.0)"
+        which gcc
     - name: Build CPython
       run: make -j4
     - name: Display build info
