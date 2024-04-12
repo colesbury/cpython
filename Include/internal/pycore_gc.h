@@ -312,6 +312,10 @@ struct _gc_runtime_state {
        collections, and are awaiting to undergo a full collection for
        the first time. */
     Py_ssize_t long_lived_pending;
+
+    /* True to use immortalization in places where we would normally use
+       deferred reference counting. */
+    int immortalize_deferred;
 #endif
 };
 
@@ -342,6 +346,11 @@ extern PyObject *_PyGC_GetReferrers(PyInterpreterState *interp, PyObject *objs);
 extern void _PyGC_ClearAllFreeLists(PyInterpreterState *interp);
 extern void _Py_ScheduleGC(PyThreadState *tstate);
 extern void _Py_RunGC(PyThreadState *tstate);
+
+#ifdef Py_GIL_DISABLED
+// gh-117783: Immortalize objects that use deferred reference counting
+extern void _PyGC_ImmortalizeDeferredObjects(PyInterpreterState *interp);
+#endif
 
 #ifdef __cplusplus
 }

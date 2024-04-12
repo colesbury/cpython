@@ -1566,6 +1566,13 @@ new_threadstate(PyInterpreterState *interp, int whence)
         // Must be called with lock unlocked to avoid re-entrancy deadlock.
         PyMem_RawFree(new_tstate);
     }
+    else {
+#ifdef Py_GIL_DISABLED
+        if (!interp->gc.immortalize_deferred) {
+            _PyGC_ImmortalizeDeferredObjects(interp);
+        }
+#endif
+    }
 
 #ifdef Py_GIL_DISABLED
     // Must be called with lock unlocked to avoid lock ordering deadlocks.
