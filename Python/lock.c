@@ -282,25 +282,46 @@ PyEvent_Wait(PyEvent *evt)
 }
 
 int
-PyEvent_WaitTimed(PyEvent *evt, PyTime_t timeout_ns)
+PyEvent_WaitTimed(PyEvent *evt, PyTime_t timeout)
 {
+    uint8_t v = _Py_atomic_load_uint8(&evt->v);
+    if (v == _Py_LOCKED) {
+        return 1;  // event already set
+    }
+
+    PyTime_t endtime = 0;
+    if (timeout > 0) {
+        endtime = _PyDeadline_Init(timeout);
+    }
     for (;;) {
-        uint8_t v = _Py_atomic_load_uint8(&evt->v);
         if (v == _Py_LOCKED) {
-            // event already set
-            return 1;
+            return 1;  // event already set
         }
         if (v == _Py_UNLOCKED) {
             if (!_Py_atomic_compare_exchange_uint8(&evt->v, &v, _Py_HAS_PARKED)) {
                 continue;
             }
         }
+        if (timeout == 0) {
+            return 0;  // timed out
+        }
 
         uint8_t expected = _Py_HAS_PARKED;
-        (void) _PyParkingLot_Park(&evt->v, &expected, sizeof(evt->v),
-                                  timeout_ns, NULL, 1);
+        int ret = _PyParkingLot_Park(&evt->v, &expected, sizeof(evt->v),
+                                     timeout, NULL, 1);
+        if (ret == Py_PARK_OK) {
+            return 1;  // event set
+        }
 
-        return _Py_atomic_load_uint8(&evt->v) == _Py_LOCKED;
+        v = _Py_atomic_load_uint8(&evt->v);
+
+        if (timeout > 0) {
+            timeout = _PyDeadline_Get(endtime);
+            if (timeout <= 0) {
+                // Avoid negative values because those mean block forever.
+                timeout = 0;
+            }
+        }
     }
 }
 

@@ -53,6 +53,10 @@ try:
     _CRLock = _thread.RLock
 except AttributeError:
     _CRLock = None
+try:
+    _CEvent = _thread.Event
+except AttributeError:
+    _CEvent = None
 TIMEOUT_MAX = _thread.TIMEOUT_MAX
 del _thread
 
@@ -915,7 +919,7 @@ class Thread:
         if _HAVE_THREAD_NATIVE_ID:
             self._native_id = None
         self._handle = _ThreadHandle()
-        self._started = Event()
+        self._started = _CEvent() if _CEvent is not None else Event()
         self._initialized = True
         # Copy of sys.stderr used by self._invoke_excepthook()
         self._stderr = _sys.stderr

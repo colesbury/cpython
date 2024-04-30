@@ -17,6 +17,11 @@
 #  include <signal.h>             // SIGINT
 #endif
 
+/*[clinic input]
+module _thread
+[clinic start generated code]*/
+/*[clinic end generated code: output=da39a3ee5e6b4b0d input=be8dbe5cc4b16df7]*/
+
 // ThreadError is just an alias to PyExc_RuntimeError
 #define ThreadError PyExc_RuntimeError
 
@@ -1332,6 +1337,170 @@ newlockobject(PyObject *module)
     return self;
 }
 
+/*[clinic input]
+class _thread.Event "eventobject *" ""
+[clinic start generated code]*/
+/*[clinic end generated code: output=da39a3ee5e6b4b0d input=6f6e00a44d7e7a5e]*/
+
+typedef struct {
+    PyObject_HEAD
+    PyEvent event;
+    PyObject *in_weakreflist;
+} eventobject;
+
+#include "clinic/_threadmodule.c.h"
+
+/*[clinic input]
+_thread.Event._at_fork_reinit
+[clinic start generated code]*/
+
+static PyObject *
+_thread_Event__at_fork_reinit_impl(eventobject *self)
+/*[clinic end generated code: output=05f686a5942caae0 input=cffd00a3eb3ed4e8]*/
+{
+    // no-op
+    Py_RETURN_NONE;
+}
+
+/*[clinic input]
+_thread.Event.is_set -> bool
+
+Return true if and only if the internal flag is true.
+[clinic start generated code]*/
+
+static int
+_thread_Event_is_set_impl(eventobject *self)
+/*[clinic end generated code: output=e13832874d415ee1 input=13433653f9d5d43b]*/
+{
+    return _PyEvent_IsSet(&self->event);
+}
+
+/*[clinic input]
+_thread.Event.set
+
+Set the internal flag to true.
+
+All threads waiting for it to become true are awakened. Threads
+that call wait() once the flag is true will not block at all.
+[clinic start generated code]*/
+
+static PyObject *
+_thread_Event_set_impl(eventobject *self)
+/*[clinic end generated code: output=ab4e6aeabc55d8c7 input=1f5cdbd31094913f]*/
+{
+    _PyEvent_Notify(&self->event);
+    Py_RETURN_NONE;
+}
+
+/*[clinic input]
+_thread.Event.clear
+
+Reset the internal flag to false.
+
+Subsequently, threads calling wait() will block until set() is called to
+set the internal flag to true again.
+[clinic start generated code]*/
+
+static PyObject *
+_thread_Event_clear_impl(eventobject *self)
+/*[clinic end generated code: output=96584c12eff96d97 input=06d3da91e4cd976c]*/
+{
+    _Py_atomic_and_uint8(&self->event.v, ~_Py_LOCKED);
+    Py_RETURN_NONE;
+}
+
+/*[clinic input]
+_thread.Event.wait -> bool
+
+    timeout: object = None
+
+Block until the internal flag is true.
+
+If the internal flag is true on entry, return immediately. Otherwise,
+block until another thread calls set() to set the flag to true, or until
+the optional timeout occurs.
+
+When the timeout argument is present and not None, it should be a
+floating point number specifying a timeout for the operation in seconds
+(or fractions thereof).
+
+This method returns the internal flag on exit, so it will always return
+True except if a timeout is given and the operation times out.
+[clinic start generated code]*/
+
+static int
+_thread_Event_wait_impl(eventobject *self, PyObject *timeout)
+/*[clinic end generated code: output=3d07271d2180fd6b input=cb6ca257c58f9da5]*/
+{
+    PY_TIMEOUT_T time = -1;
+    if (PyThread_ParseTimeoutArg(timeout, 1, &time) < 0) {
+        return -1;
+    }
+    return PyEvent_WaitTimed(&self->event, (PyTime_t)time);
+}
+
+static int
+event_traverse(eventobject *self, visitproc visit, void *arg)
+{
+    Py_VISIT(Py_TYPE(self));
+    return 0;
+}
+
+static void
+event_dealloc(eventobject *self)
+{
+    PyObject_GC_UnTrack(self);
+    if (self->in_weakreflist != NULL)
+        PyObject_ClearWeakRefs((PyObject *) self);
+    PyTypeObject *tp = Py_TYPE(self);
+    tp->tp_free(self);
+    Py_DECREF(tp);
+}
+
+static PyObject *
+event_repr(eventobject *self)
+{
+    int is_set = _PyEvent_IsSet(&self->event);
+    return PyUnicode_FromFormat(
+        "<%s at %p: %s>",
+        Py_TYPE(self)->tp_name,
+        self,
+        is_set ? "set" : "unset");
+}
+
+static PyMemberDef event_type_members[] = {
+    {"__weaklistoffset__", Py_T_PYSSIZET, offsetof(eventobject, in_weakreflist), Py_READONLY},
+    {NULL},
+};
+
+static PyMethodDef event_methods[] = {
+    _THREAD_EVENT__AT_FORK_REINIT_METHODDEF
+    _THREAD_EVENT_IS_SET_METHODDEF
+    _THREAD_EVENT_SET_METHODDEF
+    _THREAD_EVENT_CLEAR_METHODDEF
+    _THREAD_EVENT_WAIT_METHODDEF
+    {NULL,           NULL}              /* sentinel */
+};
+
+static PyType_Slot event_type_slots[] = {
+    {Py_tp_dealloc, (destructor)event_dealloc},
+    {Py_tp_repr, (reprfunc)event_repr},
+    {Py_tp_methods, event_methods},
+    {Py_tp_alloc, PyType_GenericAlloc},
+    {Py_tp_new, PyType_GenericNew},
+    {Py_tp_members, event_type_members},
+    {Py_tp_traverse, event_traverse},
+    {0, 0},
+};
+
+static PyType_Spec event_type_spec = {
+    .name = "_thread.Event",
+    .basicsize = sizeof(eventobject),
+    .flags = (Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE |
+              Py_TPFLAGS_HAVE_GC | Py_TPFLAGS_IMMUTABLETYPE),
+    .slots = event_type_slots,
+};
+
 /* Thread-local objects */
 
 /* Quick overview:
@@ -2452,6 +2621,17 @@ thread_module_exec(PyObject *module)
         return -1;
     }
     Py_DECREF(rlock_type);
+
+    // Event
+    PyTypeObject *event_type = (PyTypeObject *)PyType_FromSpec(&event_type_spec);
+    if (event_type == NULL) {
+        return -1;
+    }
+    if (PyModule_AddType(module, event_type) < 0) {
+        Py_DECREF(event_type);
+        return -1;
+    }
+    Py_DECREF(event_type);
 
     // Local dummy
     state->local_dummy_type = (PyTypeObject *)PyType_FromSpec(&local_dummy_type_spec);
