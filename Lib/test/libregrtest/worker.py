@@ -32,6 +32,16 @@ def create_worker_process(runtests: WorkerRunTests, output_fd: int,
         env['TEMP'] = tmp_dir
         env['TMP'] = tmp_dir
 
+    if 'TSAN_OPTIONS' in env and len(runtests.tests) == 1:
+        test_case = runtests.tests[0].replace('.', '_')
+        tsan_options = env['TSAN_OPTIONS']
+        parts = tsan_options.split(' ')
+        for i, part in enumerate(parts):
+            if part.startswith('log_path='):
+                parts[i] += "_" + test_case
+                break
+        env['TSAN_OPTIONS'] = ' '.join(parts)
+
     # Running the child from the same working directory as regrtest's original
     # invocation ensures that TEMPDIR for the child is the same when
     # sysconfig.is_python_build() is true. See issue 15300.
