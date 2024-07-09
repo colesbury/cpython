@@ -20,6 +20,9 @@ race:sock_recv_impl
 # https://gist.github.com/swtaarrs/08dfe7883b4c975c31ecb39388987a67
 race:free_threadstate
 
+# gh-121546: ContextVars are not thread-safe (test_context)
+race_top:PyContextVar_Get
+race_top:contextvar_set
 
 # These warnings trigger directly in a CPython function.
 
