@@ -24,6 +24,21 @@ race:free_threadstate
 race_top:PyContextVar_Get
 race_top:contextvar_set
 
+# gh-xxxxx: test_interpreters is not thread-safe (test_interpreters)
+# ./python -m test test_interpreters
+race_top:new_interpreter
+race_top:type_ready_set_new
+race_top:type_ready
+
+# gh-xxxxx: asyncio is not thread-safe (test_asyncio)
+# ./python -m test test_asyncio
+race_top:_socket_socket_close_impl
+race_top:read
+race_top:close
+race_top:sock_fileno
+race_top:PyException_GetTraceback
+
+
 # These warnings trigger directly in a CPython function.
 
 race_top:_PyEval_EvalFrameDefault
