@@ -21,18 +21,21 @@ concurrency:
 jobs:
   check_source:
     name: Change detection
-    # To use boolean outputs from this job, parse them as JSON.
-    # Here's some examples:
-    #
-    #   if: fromJSON(needs.check_source.outputs.run-docs)
-    #
-    #   ${{
-    #        fromJSON(needs.check_source.outputs.run_tests)
-    #        && 'truthy-branch'
-    #        || 'falsy-branch'
-    #   }}
-    #
-    uses: ./.github/workflows/reusable-change-detection.yml
+    steps:
+      - name: Nothing
+        run: echo "OK"
+  #   # To use boolean outputs from this job, parse them as JSON.
+  #   # Here's some examples:
+  #   #
+  #   #   if: fromJSON(needs.check_source.outputs.run-docs)
+  #   #
+  #   #   ${{
+  #   #        fromJSON(needs.check_source.outputs.run_tests)
+  #   #        && 'truthy-branch'
+  #   #        || 'falsy-branch'
+  #   #   }}
+  #   #
+  #   uses: ./.github/workflows/reusable-change-detection.yml
 
   check-docs:
     name: Docs
