@@ -1111,6 +1111,7 @@ free_delayed(uintptr_t ptr)
 #else
     PyInterpreterState *interp = _PyInterpreterState_GET();
     if (_PyInterpreterState_GetFinalizing(interp) != NULL ||
+        Py_IsFinalizing() ||
         interp->stoptheworld.world_stopped)
     {
         // Free immediately during interpreter shutdown or if the world is
