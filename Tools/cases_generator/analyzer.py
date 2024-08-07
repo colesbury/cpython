@@ -27,6 +27,7 @@ class Properties:
     tier: int | None = None
     oparg_and_1: bool = False
     const_oparg: int = -1
+    needs_prev: bool = False
 
     def dump(self, indent: str) -> None:
         print(indent, end="")
@@ -53,6 +54,7 @@ class Properties:
             has_free=any(p.has_free for p in properties),
             side_exit=any(p.side_exit for p in properties),
             pure=all(p.pure for p in properties),
+            needs_prev=any(p.needs_prev for p in properties),
         )
 
     @property
@@ -155,6 +157,7 @@ class Uop:
     annotations: list[str]
     stack: StackEffect
     caches: list[CacheEntry]
+    deferred_refs: dict[lexer.Token, str | None]
     body: list[lexer.Token]
     properties: Properties
     _size: int = -1
@@ -214,6 +217,7 @@ Part = Uop | Skip | Flush
 
 @dataclass
 class Instruction:
+    where: lexer.Token
     name: str
     parts: list[Part]
     _properties: Properties | None
@@ -317,9 +321,13 @@ def analyze_stack(op: parser.InstDef | parser.Pseudo, replace_op_arg_1: str | No
         convert_stack_item(i, replace_op_arg_1) for i in op.inputs if isinstance(i, parser.StackEffect)
     ]
     outputs: list[StackItem] = [convert_stack_item(i, replace_op_arg_1) for i in op.outputs]
+    # Mark variables with matching names at the base of the stack as "peek"
+    modified = False
     for input, output in zip(inputs, outputs):
-        if input.name == output.name:
+        if input.name == output.name and not modified:
             input.peek = output.peek = True
+        else:
+            modified = True
     if isinstance(op, parser.InstDef):
         output_names = [out.name for out in outputs]
         for input in inputs:
@@ -344,6 +352,47 @@ def analyze_caches(inputs: list[parser.InputEffect]) -> list[CacheEntry]:
             )
     return [CacheEntry(i.name, int(i.size)) for i in caches]
 
+
+def analyze_deferred_refs(node: parser.InstDef) -> dict[lexer.Token, str | None]:
+    """Look for PyStackRef_FromPyObjectNew() calls"""
+
+    def find_assignment_target(idx: int) -> list[lexer.Token]:
+        """Find the tokens that make up the left-hand side of an assignment"""
+        offset = 1
+        for tkn in reversed(node.block.tokens[:idx-1]):
+            if tkn.kind == "SEMI" or tkn.kind == "LBRACE" or tkn.kind == "RBRACE":
+                return node.block.tokens[idx-offset:idx-1]
+            offset += 1
+        return []
+
+    refs: dict[lexer.Token, str | None] = {}
+    for idx, tkn in enumerate(node.block.tokens):
+        if tkn.kind != "IDENTIFIER" or tkn.text != "PyStackRef_FromPyObjectNew":
+            continue
+
+        if idx == 0 or node.block.tokens[idx-1].kind != "EQUALS":
+            raise analysis_error("Expected '=' before PyStackRef_FromPyObjectNew", tkn)
+
+        lhs = find_assignment_target(idx)
+        if len(lhs) == 0:
+            raise analysis_error("PyStackRef_FromPyObjectNew() must be assigned to an output", tkn)
+
+        if lhs[0].kind == "TIMES" or any(t.kind == "ARROW" or t.kind == "LBRACKET" for t in lhs[1:]):
+            # Don't handle: *ptr = ..., ptr->field = ..., or ptr[field] = ...
+            # Assume that they are visible to the GC.
+            refs[tkn] = None
+            continue
+
+        if len(lhs) != 1 or lhs[0].kind != "IDENTIFIER":
+            raise analysis_error("PyStackRef_FromPyObjectNew() must be assigned to an output", tkn)
+
+        name = lhs[0].text
+        if not any(var.name == name for var in node.outputs):
+            raise analysis_error(f"PyStackRef_FromPyObjectNew() must be assigned to an output, not '{name}'", tkn)
+
+        refs[tkn] = name
+
+    return refs
 
 def variable_used(node: parser.InstDef, name: str) -> bool:
     """Determine whether a variable with a given name is used in a node."""
@@ -615,6 +664,7 @@ def compute_properties(op: parser.InstDef) -> Properties:
         has_free=has_free,
         pure="pure" in op.annotations,
         tier=tier_variable(op),
+        needs_prev=variable_used(op, "prev_instr"),
     )
 
 
@@ -625,6 +675,7 @@ def make_uop(name: str, op: parser.InstDef, inputs: list[parser.InputEffect], uo
         annotations=op.annotations,
         stack=analyze_stack(op),
         caches=analyze_caches(inputs),
+        deferred_refs=analyze_deferred_refs(op),
         body=op.block.tokens,
         properties=compute_properties(op),
     )
@@ -642,6 +693,7 @@ def make_uop(name: str, op: parser.InstDef, inputs: list[parser.InputEffect], uo
                 annotations=op.annotations,
                 stack=analyze_stack(op, bit),
                 caches=analyze_caches(inputs),
+                deferred_refs=analyze_deferred_refs(op),
                 body=op.block.tokens,
                 properties=properties,
             )
@@ -664,6 +716,7 @@ def make_uop(name: str, op: parser.InstDef, inputs: list[parser.InputEffect], uo
             annotations=op.annotations,
             stack=analyze_stack(op),
             caches=analyze_caches(inputs),
+            deferred_refs=analyze_deferred_refs(op),
             body=op.block.tokens,
             properties=properties,
         )
@@ -684,9 +737,10 @@ def add_op(op: parser.InstDef, uops: dict[str, Uop]) -> None:
 
 
 def add_instruction(
-    name: str, parts: list[Part], instructions: dict[str, Instruction]
+    where: lexer.Token, name: str, parts: list[Part],
+    instructions: dict[str, Instruction]
 ) -> None:
-    instructions[name] = Instruction(name, parts, None)
+    instructions[name] = Instruction(where, name, parts, None)
 
 
 def desugar_inst(
@@ -714,7 +768,7 @@ def desugar_inst(
         parts.append(uop)
     else:
         parts[uop_index] = uop
-    add_instruction(name, parts, instructions)
+    add_instruction(inst.first_token, name, parts, instructions)
 
 
 def add_macro(
@@ -735,7 +789,7 @@ def add_macro(
             case _:
                 assert False
     assert parts
-    add_instruction(macro.name, parts, instructions)
+    add_instruction(macro.first_token, macro.name, parts, instructions)
 
 
 def add_family(
@@ -793,12 +847,6 @@ def assign_opcodes(
     instmap["INSTRUMENTED_LINE"] = 254
 
     instrumented = [name for name in instructions if name.startswith("INSTRUMENTED")]
-
-    # Special case: this instruction is implemented in ceval.c
-    # rather than bytecodes.c, so we need to add it explicitly
-    # here (at least until we add something to bytecodes.c to
-    # declare external instructions).
-    instrumented.append("INSTRUMENTED_LINE")
 
     specialized: set[str] = set()
     no_arg: list[str] = []
