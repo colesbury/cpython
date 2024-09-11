@@ -753,9 +753,9 @@
             _Py_DECREF_NO_DEALLOC(left_o);
             PyObject *temp = PyStackRef_AsPyObjectBorrow(*target_local);
             PyUnicode_Append(&temp, right_o);
-            *target_local = PyStackRef_FromPyObjectSteal(temp);
             _Py_DECREF_SPECIALIZED(right_o, _PyUnicode_ExactDealloc);
-            if (PyStackRef_IsNull(*target_local)) JUMP_TO_ERROR();
+            if (temp == NULL) JUMP_TO_ERROR();
+            *target_local = PyStackRef_FromPyObjectSteal(temp);
             #if TIER_ONE
             // The STORE_FAST is already done. This is done here in tier one,
             // and during trace projection in tier two:
@@ -3081,9 +3081,10 @@
             _PyStackRef iter;
             iterable = stack_pointer[-1];
             /* before: [obj]; after [getiter(obj)] */
-            iter = PyStackRef_FromPyObjectSteal(PyObject_GetIter(PyStackRef_AsPyObjectBorrow(iterable)));
+            PyObject *iter_o = PyObject_GetIter(PyStackRef_AsPyObjectBorrow(iterable));
             PyStackRef_CLOSE(iterable);
-            if (PyStackRef_IsNull(iter)) JUMP_TO_ERROR();
+            if (iter_o == NULL) JUMP_TO_ERROR();
+            iter = PyStackRef_FromPyObjectSteal(iter_o);
             stack_pointer[-1] = iter;
             break;
         }
@@ -3111,10 +3112,11 @@
             }
             else {
                 /* `iterable` is not a generator. */
-                iter = PyStackRef_FromPyObjectSteal(PyObject_GetIter(iterable_o));
-                if (PyStackRef_IsNull(iter)) {
+                PyObject *iter_o = PyObject_GetIter(iterable_o);
+                if (iter_o == NULL) {
                     JUMP_TO_ERROR();
                 }
+                iter = PyStackRef_FromPyObjectSteal(iter_o);
                 PyStackRef_CLOSE(iterable);
             }
             stack_pointer[-1] = iter;
@@ -3336,16 +3338,23 @@
             PyObject *owner_o = PyStackRef_AsPyObjectSteal(owner);
             PyObject *name = _Py_SpecialMethods[oparg].name;
             PyObject *self_or_null_o;
-            attr = PyStackRef_FromPyObjectSteal(_PyObject_LookupSpecialMethod(owner_o, name, &self_or_null_o));
-            if (PyStackRef_IsNull(attr)) {
+            PyObject *attr_o = _PyObject_LookupSpecialMethod(owner_o, name, &self_or_null_o);
+            if (attr_o == NULL) {
                 if (!_PyErr_Occurred(tstate)) {
                     _PyErr_Format(tstate, PyExc_TypeError,
                                   _Py_SpecialMethods[oparg].error,
                                   Py_TYPE(owner_o)->tp_name);
                 }
+                if (true) JUMP_TO_ERROR();
             }
-            if (PyStackRef_IsNull(attr)) JUMP_TO_ERROR();
-            self_or_null = PyStackRef_FromPyObjectSteal(self_or_null_o);
+            attr = PyStackRef_FromPyObjectSteal(attr_o);
+            // TODO: Make _PyObject_LookupSpecialMethod take a _PyStackRef* for self_or_null
+            if (self_or_null_o == NULL) {
+                self_or_null = PyStackRef_NULL;
+            }
+            else {
+                self_or_null = PyStackRef_FromPyObjectSteal(self_or_null_o);
+            }
             stack_pointer[-1] = attr;
             stack_pointer[0] = self_or_null;
             stack_pointer += 1;
@@ -3388,9 +3397,11 @@
             (void)lasti; // Shut up compiler warning if asserts are off
             PyObject *stack[5] = {NULL, PyStackRef_AsPyObjectBorrow(exit_self), exc, val_o, tb};
             int has_self = !PyStackRef_IsNull(exit_self);
-            res = PyStackRef_FromPyObjectSteal(PyObject_Vectorcall(exit_func_o, stack + 2 - has_self,
-                    (3 + has_self) | PY_VECTORCALL_ARGUMENTS_OFFSET, NULL));
-            if (PyStackRef_IsNull(res)) JUMP_TO_ERROR();
+            PyObject *res_o = PyObject_Vectorcall(
+                exit_func_o, stack + 2 - has_self,
+                (3 + has_self) | PY_VECTORCALL_ARGUMENTS_OFFSET, NULL);
+            if (res_o == NULL) JUMP_TO_ERROR();
+            res = PyStackRef_FromPyObjectSteal(res_o);
             stack_pointer[0] = res;
             stack_pointer += 1;
             assert(WITHIN_STACK_BOUNDS());
@@ -4050,9 +4061,10 @@
                 JUMP_TO_JUMP_TARGET();
             }
             STAT_INC(CALL, hit);
-            res = PyStackRef_FromPyObjectSteal(PyObject_Str(arg_o));
+            PyObject *res_o = PyObject_Str(arg_o);
             PyStackRef_CLOSE(arg);
-            if (PyStackRef_IsNull(res)) JUMP_TO_ERROR();
+            if (res_o == NULL) JUMP_TO_ERROR();
+            res = PyStackRef_FromPyObjectSteal(res_o);
             stack_pointer[-3] = res;
             stack_pointer += -2;
             assert(WITHIN_STACK_BOUNDS());
@@ -4080,9 +4092,10 @@
                 JUMP_TO_JUMP_TARGET();
             }
             STAT_INC(CALL, hit);
-            res = PyStackRef_FromPyObjectSteal(PySequence_Tuple(arg_o));
+            PyObject *res_o = PySequence_Tuple(arg_o);
             PyStackRef_CLOSE(arg);
-            if (PyStackRef_IsNull(res)) JUMP_TO_ERROR();
+            if (res_o == NULL) JUMP_TO_ERROR();
+            res = PyStackRef_FromPyObjectSteal(res_o);
             stack_pointer[-3] = res;
             stack_pointer += -2;
             assert(WITHIN_STACK_BOUNDS());
@@ -4123,10 +4136,11 @@
                 JUMP_TO_JUMP_TARGET();
             }
             STAT_INC(CALL, hit);
-            self = PyStackRef_FromPyObjectSteal(_PyType_NewManagedObject(tp));
-            if (PyStackRef_IsNull(self)) {
+            PyObject *self_o = _PyType_NewManagedObject(tp);
+            if (self_o == NULL) {
                 JUMP_TO_ERROR();
             }
+            self = PyStackRef_FromPyObjectSteal(self_o);
             PyStackRef_CLOSE(callable);
             init = PyStackRef_FromPyObjectNew(init_func);
             stack_pointer[-1 - oparg] = init;
@@ -5082,9 +5096,10 @@
             /* If value is a unicode object, then we know the result
              * of format(value) is value itself. */
             if (!PyUnicode_CheckExact(value_o)) {
-                res = PyStackRef_FromPyObjectSteal(PyObject_Format(value_o, NULL));
+                PyObject *res_o = PyObject_Format(value_o, NULL);
                 PyStackRef_CLOSE(value);
-                if (PyStackRef_IsNull(res)) JUMP_TO_ERROR();
+                if (res_o == NULL) JUMP_TO_ERROR();
+                res = PyStackRef_FromPyObjectSteal(res_o);
             }
             else {
                 res = value;

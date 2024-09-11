@@ -132,10 +132,9 @@ PyStackRef_AsPyObjectSteal(_PyStackRef stackref)
 static inline _PyStackRef
 _PyStackRef_FromPyObjectSteal(PyObject *obj)
 {
-    // Make sure we don't take an already tagged value.
-    assert(((uintptr_t)obj & Py_TAG_BITS) == 0);
-    int tag = (obj == NULL || _Py_IsImmortal(obj)) ? (Py_TAG_DEFERRED) : Py_TAG_PTR;
-    return ((_PyStackRef){.bits = ((uintptr_t)(obj)) | tag});
+    assert(obj != NULL);
+    assert(((uintptr_t)obj & Py_TAG_BITS) == 0 && "pointer already tagged");
+    return (_PyStackRef){.bits = (uintptr_t)obj};
 }
 #   define PyStackRef_FromPyObjectSteal(obj) _PyStackRef_FromPyObjectSteal(_PyObject_CAST(obj))
 #else
