@@ -1750,33 +1750,6 @@ fail:
     return NULL;
 }
 
-static _PyInterpreterFrame *
-_PyEvalFramePushAndInit_UnTagged(PyThreadState *tstate, PyFunctionObject *func,
-                        PyObject *locals, PyObject *const* args,
-                        size_t argcount, PyObject *kwnames, _PyInterpreterFrame *previous)
-{
-#if defined(Py_GIL_DISABLED)
-    size_t kw_count = kwnames == NULL ? 0 : PyTuple_GET_SIZE(kwnames);
-    size_t total_argcount = argcount + kw_count;
-    _PyStackRef *tagged_args_buffer = PyMem_Malloc(sizeof(_PyStackRef) * total_argcount);
-    if (tagged_args_buffer == NULL) {
-        PyErr_NoMemory();
-        return NULL;
-    }
-    for (size_t i = 0; i < argcount; i++) {
-        tagged_args_buffer[i] = PyStackRef_FromPyObjectSteal(args[i]);
-    }
-    for (size_t i = 0; i < kw_count; i++) {
-        tagged_args_buffer[argcount + i] = PyStackRef_FromPyObjectSteal(args[argcount + i]);
-    }
-    _PyInterpreterFrame *res = _PyEvalFramePushAndInit(tstate, func, locals, (_PyStackRef const *)tagged_args_buffer, argcount, kwnames, previous);
-    PyMem_Free(tagged_args_buffer);
-    return res;
-#else
-    return _PyEvalFramePushAndInit(tstate, func, locals, (_PyStackRef const *)args, argcount, kwnames, previous);
-#endif
-}
-
 /* Same as _PyEvalFramePushAndInit but takes an args tuple and kwargs dict.
    Steals references to func, callargs and kwargs.
 */
@@ -1801,10 +1774,9 @@ _PyEvalFramePushAndInit_Ex(PyThreadState *tstate, PyFunctionObject *func,
             Py_INCREF(PyTuple_GET_ITEM(callargs, i));
         }
     }
-    _PyInterpreterFrame *new_frame = _PyEvalFramePushAndInit_UnTagged(
-        tstate, (PyFunctionObject *)func, locals,
-        newargs, nargs, kwnames, previous
-    );
+    _PyInterpreterFrame *new_frame = _PyEvalFramePushAndInit(
+        tstate, func, locals, (_PyStackRef const *)newargs,
+        nargs, kwnames, previous);
     if (has_dict) {
         _PyStack_UnpackDict_FreeNoDecRef(newargs, kwnames);
     }
@@ -1839,8 +1811,8 @@ _PyEval_Vector(PyThreadState *tstate, PyFunctionObject *func,
             Py_INCREF(args[i+argcount]);
         }
     }
-    _PyInterpreterFrame *frame = _PyEvalFramePushAndInit_UnTagged(
-        tstate, func, locals, args, argcount, kwnames, NULL);
+    _PyInterpreterFrame *frame = _PyEvalFramePushAndInit(
+        tstate, func, locals, (_PyStackRef const *)args, argcount, kwnames, NULL);
     if (frame == NULL) {
         return NULL;
     }

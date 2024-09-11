@@ -88,10 +88,11 @@ typedef union _PyStackRef {
 
 // Note: the following are all macros because MSVC (Windows) has trouble inlining them.
 
-#define PyStackRef_Is(a, b) ((a).bits == (b).bits)
-
 #define PyStackRef_IsDeferred(ref) (((ref).bits & Py_TAG_BITS) == Py_TAG_DEFERRED)
 
+#define PyStackRef_IsFalse(ref) (PyStackRef_AsPyObjectBorrow(ref) == Py_False)
+#define PyStackRef_IsTrue(ref) (PyStackRef_AsPyObjectBorrow(ref) == Py_True)
+#define PyStackRef_IsNone(ref) (PyStackRef_AsPyObjectBorrow(ref) == Py_None)
 
 #ifdef Py_GIL_DISABLED
 // Gets a PyObject * from a _PyStackRef

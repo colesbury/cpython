@@ -350,7 +350,7 @@
             _PyStackRef res;
             value = stack_pointer[-1];
             assert(PyStackRef_BoolCheck(value));
-            res = PyStackRef_Is(value, PyStackRef_False)
+            res = PyStackRef_IsFalse(value)
             ? PyStackRef_True : PyStackRef_False;
             stack_pointer[-1] = res;
             break;
@@ -422,7 +422,7 @@
             _PyStackRef res;
             value = stack_pointer[-1];
             // This one is a bit weird, because we expect *some* failures:
-            if (!PyStackRef_Is(value, PyStackRef_None)) {
+            if (!PyStackRef_IsNone(value)) {
                 UOP_STAT_INC(uopcode, miss);
                 JUMP_TO_JUMP_TARGET();
             }
@@ -733,7 +733,7 @@
             next_oparg = CURRENT_OPERAND();
             #endif
             _PyStackRef *target_local = &GETLOCAL(next_oparg);
-            if (!PyStackRef_Is(*target_local, left)) {
+            if (PyStackRef_AsPyObjectBorrow(*target_local) != left_o) {
                 UOP_STAT_INC(uopcode, miss);
                 JUMP_TO_JUMP_TARGET();
             }
@@ -1374,7 +1374,7 @@
             exc_value = stack_pointer[-1];
             _PyErr_StackItem *exc_info = tstate->exc_info;
             Py_XSETREF(exc_info->exc_value,
-                       PyStackRef_Is(exc_value, PyStackRef_None)
+                       PyStackRef_IsNone(exc_value)
                        ? NULL : PyStackRef_AsPyObjectSteal(exc_value));
             stack_pointer += -1;
             assert(WITHIN_STACK_BOUNDS());
@@ -2793,16 +2793,11 @@
             oparg = CURRENT_OPARG();
             right = stack_pointer[-1];
             left = stack_pointer[-2];
-            #ifdef Py_GIL_DISABLED
-            // On free-threaded builds, objects are conditionally immortalized.
-            // So their bits don't always compare equally.
-            int res = Py_Is(PyStackRef_AsPyObjectBorrow(left), PyStackRef_AsPyObjectBorrow(right)) ^ oparg;
-            #else
-            int res = PyStackRef_Is(left, right) ^ oparg;
-            #endif
+            int same = Py_Is(PyStackRef_AsPyObjectBorrow(left),
+                             PyStackRef_AsPyObjectBorrow(right));
             PyStackRef_CLOSE(left);
             PyStackRef_CLOSE(right);
-            b = res ? PyStackRef_True : PyStackRef_False;
+            b = (same ^ oparg) ? PyStackRef_True : PyStackRef_False;
             stack_pointer[-2] = b;
             stack_pointer += -1;
             assert(WITHIN_STACK_BOUNDS());
@@ -2979,7 +2974,7 @@
             _PyStackRef value;
             _PyStackRef b;
             value = stack_pointer[-1];
-            if (PyStackRef_Is(value, PyStackRef_None)) {
+            if (PyStackRef_IsNone(value)) {
                 b = PyStackRef_True;
             }
             else {
@@ -4178,7 +4173,7 @@
             _PyStackRef should_be_none;
             should_be_none = stack_pointer[-1];
             assert(STACK_LEVEL() == 2);
-            if (!PyStackRef_Is(should_be_none, PyStackRef_None)) {
+            if (!PyStackRef_IsNone(should_be_none)) {
                 PyErr_Format(PyExc_TypeError,
                              "__init__() should return None, not '%.200s'",
                              Py_TYPE(PyStackRef_AsPyObjectBorrow(should_be_none))->tp_name);
@@ -5182,11 +5177,11 @@
             flag = stack_pointer[-1];
             stack_pointer += -1;
             assert(WITHIN_STACK_BOUNDS());
-            if (!PyStackRef_Is(flag, PyStackRef_True)) {
+            if (!PyStackRef_IsTrue(flag)) {
                 UOP_STAT_INC(uopcode, miss);
                 JUMP_TO_JUMP_TARGET();
             }
-            assert(PyStackRef_Is(flag, PyStackRef_True));
+            assert(PyStackRef_IsTrue(flag));
             break;
         }
 
@@ -5195,11 +5190,11 @@
             flag = stack_pointer[-1];
             stack_pointer += -1;
             assert(WITHIN_STACK_BOUNDS());
-            if (!PyStackRef_Is(flag, PyStackRef_False)) {
+            if (!PyStackRef_IsFalse(flag)) {
                 UOP_STAT_INC(uopcode, miss);
                 JUMP_TO_JUMP_TARGET();
             }
-            assert(PyStackRef_Is(flag, PyStackRef_False));
+            assert(PyStackRef_IsFalse(flag));
             break;
         }
 
@@ -5208,7 +5203,7 @@
             val = stack_pointer[-1];
             stack_pointer += -1;
             assert(WITHIN_STACK_BOUNDS());
-            if (!PyStackRef_Is(val, PyStackRef_None)) {
+            if (!PyStackRef_IsNone(val)) {
                 PyStackRef_CLOSE(val);
                 if (1) {
                     UOP_STAT_INC(uopcode, miss);
@@ -5223,7 +5218,7 @@
             val = stack_pointer[-1];
             stack_pointer += -1;
             assert(WITHIN_STACK_BOUNDS());
-            if (PyStackRef_Is(val, PyStackRef_None)) {
+            if (PyStackRef_IsNone(val)) {
                 UOP_STAT_INC(uopcode, miss);
                 JUMP_TO_JUMP_TARGET();
             }
