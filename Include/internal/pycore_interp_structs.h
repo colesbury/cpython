@@ -507,6 +507,7 @@ typedef struct {
        are also some diagnostic uses for the list of weakrefs,
        so we still keep it. */
     PyObject *tp_weaklist;
+    _Py_mro_cache tp_mro_cache;
 } managed_static_type_state;
 
 #define TYPE_VERSION_CACHE_SIZE (1<<12)  /* Must be a power of 2 */
@@ -688,6 +689,33 @@ struct _Py_interp_static_objects {
         PyHamtObject hamt_empty;
         PyBaseExceptionObject last_resort_memory_error;
     } singletons;
+};
+
+typedef struct _Py_mro_cache_entry {
+    PyObject *name;     /* name (interned unicode; immortal) */
+    uintptr_t value;    /* resolved function (owned ref), or 0=not cached 1=not present */
+} _Py_mro_cache_entry;
+
+typedef struct _Py_mro_cache_buckets {
+    struct _Py_mro_cache_buckets *next;
+    union {
+        Py_ssize_t refcount;
+        Py_ssize_t capacity;
+    } u;
+    Py_ssize_t cap2;
+    uint32_t available; /* number of unused buckets */
+    uint32_t used;      /* number of used buckets */
+    _Py_mro_cache_entry array[];
+} _Py_mro_cache_buckets;
+
+/* Per-interpreter state */
+struct _Py_mro_cache_state {
+    _Py_mro_cache_buckets *empty_buckets;
+    Py_ssize_t empty_buckets_capacity;
+    struct {
+        struct _Py_mro_cache_buckets *head;
+        struct _Py_mro_cache_buckets *tail;
+    } buckets_to_free;
 };
 
 #include "pycore_instruments.h"   // PY_MONITORING_TOOL_IDS
@@ -910,6 +938,7 @@ struct _is {
     struct _Py_dict_state dict_state;
     struct _Py_exc_state exc_state;
     struct _Py_mem_interp_free_queue mem_free_queue;
+    struct _Py_mro_cache_state mro_state;
 
     struct ast_state ast;
     struct types_state types;

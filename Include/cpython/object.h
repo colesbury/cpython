@@ -139,6 +139,13 @@ typedef struct {
      releasebufferproc bf_releasebuffer;
 } PyBufferProcs;
 
+struct _Py_mro_cache_entry;
+
+typedef struct {
+    struct _Py_mro_cache_entry *buckets;
+    uint32_t mask;
+} _Py_mro_cache;
+
 /* Allow printfunc in the tp_vectorcall_offset slot for
  * backwards-compatibility */
 typedef Py_ssize_t printfunc;
@@ -229,6 +236,8 @@ struct _typeobject {
 
     destructor tp_finalize;
     vectorcallfunc tp_vectorcall;
+
+    _Py_mro_cache tp_mro_cache;
 
     /* bitset of which type-watchers care about this type */
     unsigned char tp_watched;

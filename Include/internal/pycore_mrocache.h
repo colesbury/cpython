@@ -1,0 +1,100 @@
+#ifndef Py_INTERNAL_TYPECACHE_H
+#define Py_INTERNAL_TYPECACHE_H
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+#ifndef Py_BUILD_CORE
+#  error "this header requires Py_BUILD_CORE define"
+#endif
+
+#include "pycore_interp_structs.h"      // _Py_mro_cache_entry
+
+typedef struct _Py_mro_cache_result {
+    int hit;
+    PyObject *value;
+} _Py_mro_cache_result;
+
+
+// Inserts an entry into the cache (requires type lock).
+// The `name` must be an interned unicode string.
+extern void
+_Py_mro_cache_insert(_Py_mro_cache *cache, PyObject *name, PyObject *value);
+
+// Erases the cache (requires type lock)
+extern void _Py_mro_cache_erase(_Py_mro_cache *cache);
+
+
+// Interpreter lifecycle functions
+extern PyStatus _Py_mro_cache_init(PyInterpreterState *interp);
+extern void _Py_mro_cache_fini(PyInterpreterState *interp);
+
+// Type lifecycle functions (require type lock)
+extern void _Py_mro_cache_init_type(PyTypeObject *type);
+extern void _Py_mro_cache_fini_type(PyTypeObject *type);
+
+//
+extern int _Py_mro_cache_visit(_Py_mro_cache *cache, visitproc visit, void *arg);
+
+extern void _Py_mro_process_freed_buckets(PyInterpreterState *interp);
+
+extern PyObject *_Py_mro_cache_as_dict(_Py_mro_cache *cache);
+
+static inline _Py_mro_cache_result
+_Py_mro_cache_make_result(uintptr_t *ptr)
+{
+    uintptr_t value = _Py_atomic_load_uintptr_relaxed(ptr);
+    return (_Py_mro_cache_result) {
+        .hit = (value != 0),
+        .value = (PyObject *)(value & ~1),
+    };
+}
+
+static inline struct _Py_mro_cache_result
+_Py_mro_cache_lookup(_Py_mro_cache *cache, PyObject *name)
+{
+    Py_hash_t hash = ((PyASCIIObject *)name)->hash;
+    uint32_t mask = _Py_atomic_load_uint32(&cache->mask);
+    _Py_mro_cache_entry *first = _Py_atomic_load_ptr_relaxed(&cache->buckets);
+
+    Py_ssize_t offset = hash & mask;
+    _Py_mro_cache_entry *bucket = (_Py_mro_cache_entry *)((char *)first + offset);
+
+    PyObject *entry_name = _Py_atomic_load_ptr_relaxed(&bucket->name);
+    if (entry_name == name) {
+        return _Py_mro_cache_make_result(&bucket->value);
+    }
+
+    // First loop
+    while (1) {
+        if (entry_name == NULL) {
+            return (_Py_mro_cache_result){0, NULL};
+        }
+        if (bucket == first) {
+            break;
+        }
+        bucket--;
+        entry_name = _Py_atomic_load_ptr_relaxed(&bucket->name);
+        if (entry_name == name) {
+            return _Py_mro_cache_make_result(&bucket->value);
+        }
+    }
+
+    // Second loop. Start at the last bucket.
+    bucket = (_Py_mro_cache_entry *)((char *)first + mask);
+    while (1) {
+        entry_name = _Py_atomic_load_ptr_relaxed(&bucket->name);
+        if (entry_name == name) {
+            return _Py_mro_cache_make_result(&bucket->value);
+        }
+        if (entry_name == NULL || bucket == first) {
+            return (_Py_mro_cache_result){0, NULL};
+        }
+        bucket--;
+    }
+}
+
+#ifdef __cplusplus
+}
+#endif
+#endif   /* !Py_INTERNAL_TYPECACHE_H */
