@@ -30,6 +30,7 @@ extern "C" {
 #include "pycore_instruments.h"   // _PY_MONITORING_EVENTS
 #include "pycore_list.h"          // struct _Py_list_state
 #include "pycore_mimalloc.h"      // struct _mimalloc_interp_state
+#include "pycore_mrocache.h"      // struct _Py_Py_mro_cache_state
 #include "pycore_object_state.h"  // struct _py_object_state
 #include "pycore_optimizer.h"     // _PyOptimizerObject
 #include "pycore_obmalloc.h"      // struct _obmalloc_state
@@ -257,6 +258,7 @@ struct _is {
     struct _Py_dict_state dict_state;
     struct _Py_exc_state exc_state;
     struct _Py_mem_interp_free_queue mem_free_queue;
+    struct _Py_mro_cache_state mro_state;
 
     struct ast_state ast;
     struct types_state types;

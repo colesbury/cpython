@@ -17,6 +17,7 @@
 #include "pycore_initconfig.h"    // _PyStatus_OK()
 #include "pycore_list.h"          // _PyList_Fini()
 #include "pycore_long.h"          // _PyLong_InitTypes()
+#include "pycore_mrocache.h"      // _Py_mro_cache_init()
 #include "pycore_object.h"        // _PyDebug_PrintTotalRefs()
 #include "pycore_pathconfig.h"    // _PyPathConfig_UpdateGlobal()
 #include "pycore_pyerrors.h"      // _PyErr_Occurred()
@@ -879,6 +880,11 @@ pycore_interp_init(PyThreadState *tstate)
     status = _PyGC_Init(interp);
     if (_PyStatus_EXCEPTION(status)) {
         return status;
+    }
+
+    status = _Py_mro_cache_init(interp);
+    if (_PyStatus_EXCEPTION(status)) {
+        goto done;
     }
 
     status = pycore_init_types(interp);
@@ -1866,6 +1872,8 @@ finalize_interp_types(PyInterpreterState *interp)
     _PyUnicode_ClearInterned(interp);
 
     _PyUnicode_Fini(interp);
+
+    _Py_mro_cache_fini(interp);
 
 #ifndef Py_GIL_DISABLED
     // With Py_GIL_DISABLED:

@@ -85,6 +85,7 @@ typedef struct {
        are also some diagnostic uses for the list of weakrefs,
        so we still keep it. */
     PyObject *tp_weaklist;
+    _Py_mro_cache tp_mro_cache;
 } managed_static_type_state;
 
 #define TYPE_VERSION_CACHE_SIZE (1<<12)  /* Must be a power of 2 */
