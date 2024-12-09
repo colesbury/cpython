@@ -151,6 +151,7 @@ dummy_func(
             _Py_CHECK_EMSCRIPTEN_SIGNALS_PERIODICALLY();
             QSBR_QUIESCENT_STATE(tstate);
             if (_Py_atomic_load_uintptr_relaxed(&tstate->eval_breaker) & _PY_EVAL_EVENTS_MASK) {
+                SYNC_SP();
                 int err = _Py_HandlePending(tstate);
                 ERROR_IF(err != 0, error);
             }

@@ -383,6 +383,9 @@ gc_visit_thread_stacks(PyInterpreterState *interp)
 
             PyCodeObject *co = (PyCodeObject *)executable;
             int max_stack = co->co_nlocalsplus + co->co_stacksize;
+            if (f->stackpointer) {
+                max_stack = (int)(f->stackpointer - f->localsplus);
+            }
             gc_visit_stackref(f->f_executable);
             for (int i = 0; i < max_stack; i++) {
                 gc_visit_stackref(f->localsplus[i]);
