@@ -2953,6 +2953,14 @@ _PyObject_AssertFailed(PyObject *obj, const char *expr, const char *msg,
     Py_FatalError("_PyObject_AssertFailed");
 }
 
+Py_NO_INLINE
+static void
+reftracer_destroy(PyObject *op)
+{
+    _PyReftracerTrack(op, PyRefTracer_DESTROY);
+    Py_DECREF(op);
+}
+
 
 void
 _Py_Dealloc(PyObject *op)
@@ -2972,8 +2980,12 @@ _Py_Dealloc(PyObject *op)
 #ifdef Py_TRACE_REFS
     _Py_ForgetReference(op);
 #endif
-    _PyReftracerTrack(op, PyRefTracer_DESTROY);
-    (*dealloc)(op);
+    if (_PyRuntime.ref_tracer.tracer_func) {
+        reftracer_destroy(op);
+    }
+    else {
+        (*dealloc)(op);
+    }
 
 #ifdef Py_DEBUG
     // gh-89373: The tp_dealloc function must leave the current exception
