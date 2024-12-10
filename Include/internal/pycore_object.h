@@ -436,7 +436,7 @@ _PyObject_InitVar(PyVarObject *op, PyTypeObject *typeobj, Py_ssize_t size)
 
 /* Tell the GC to track this object.
  *
- * The object must not be tracked by the GC.
+ * This is a no-op if the object is already tracked by the GC.
  *
  * NB: While the object is tracked by the collector, it must be safe to call the
  * ob_traverse method.
@@ -454,12 +454,12 @@ static inline void _PyObject_GC_TRACK(
 #endif
     PyObject *op)
 {
-    _PyObject_ASSERT_FROM(op, !_PyObject_GC_IS_TRACKED(op),
-                          "object already tracked by the garbage collector",
-                          filename, lineno, __func__);
 #ifdef Py_GIL_DISABLED
     _PyObject_SET_GC_BITS(op, _PyGC_BITS_TRACKED);
 #else
+    if (_PyObject_GC_IS_TRACKED(op)) {
+        return;
+    }
     PyGC_Head *gc = _Py_AS_GC(op);
     _PyObject_ASSERT_FROM(op,
                           (gc->_gc_prev & _PyGC_PREV_MASK_COLLECTING) == 0,
@@ -482,10 +482,9 @@ static inline void _PyObject_GC_TRACK(
  * Internal note: This may be called while GC. So _PyGC_PREV_MASK_COLLECTING
  * must be cleared. But _PyGC_PREV_MASK_FINALIZED bit is kept.
  *
- * The object must be tracked by the GC.
+ * This is a no-op if the object is not tracked by the GC.
  *
- * See also the public PyObject_GC_UnTrack() which accept an object which is
- * not tracked.
+ * See also the public PyObject_GC_UnTrack().
  */
 static inline void _PyObject_GC_UNTRACK(
 // The preprocessor removes _PyObject_ASSERT_FROM() calls if NDEBUG is defined
@@ -494,13 +493,12 @@ static inline void _PyObject_GC_UNTRACK(
 #endif
     PyObject *op)
 {
-    _PyObject_ASSERT_FROM(op, _PyObject_GC_IS_TRACKED(op),
-                          "object not tracked by the garbage collector",
-                          filename, lineno, __func__);
-
 #ifdef Py_GIL_DISABLED
     _PyObject_CLEAR_GC_BITS(op, _PyGC_BITS_TRACKED);
 #else
+    if (!_PyObject_GC_IS_TRACKED(op)) {
+        return;
+    }
     PyGC_Head *gc = _Py_AS_GC(op);
     PyGC_Head *prev = _PyGCHead_PREV(gc);
     PyGC_Head *next = _PyGCHead_NEXT(gc);

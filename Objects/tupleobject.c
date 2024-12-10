@@ -199,7 +199,7 @@ tuple_dealloc(PyObject *self)
 #endif
     }
 
-    PyObject_GC_UnTrack(op);
+    _PyObject_GC_UNTRACK(op);
     Py_TRASHCAN_BEGIN(op, tuple_dealloc)
 
     Py_ssize_t i = Py_SIZE(op);
