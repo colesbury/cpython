@@ -51,6 +51,7 @@ static inline PyObject* _Py_FROM_GC(PyGC_Head *gc) {
 #  define _PyGC_BITS_FROZEN         (8)
 #  define _PyGC_BITS_SHARED         (16)
 #  define _PyGC_BITS_DEFERRED       (64)    // Use deferred reference counting
+#  define _PyGC_BITS_REACHABLE      (128)
 #endif
 
 #ifdef Py_GIL_DISABLED

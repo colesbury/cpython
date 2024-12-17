@@ -33,6 +33,8 @@ typedef struct _gc_runtime_state GCState;
 // Automatically choose the generation that needs collecting.
 #define GENERATION_AUTO (-1)
 
+#define prefetch(ptr) __builtin_prefetch(ptr, 1, 3)
+
 // A linked list of objects using the `ob_tid` field as the next pointer.
 // The linked list pointers are distinct from any real thread ids, because the
 // thread ids returned by _Py_ThreadId() are also pointers to distinct objects.
@@ -460,7 +462,8 @@ visit_decref(PyObject *op, void *arg)
 {
     if (_PyObject_GC_IS_TRACKED(op)
         && !_Py_IsImmortal(op)
-        && !gc_is_frozen(op))
+        && !gc_is_frozen(op)
+        && !_PyObject_HAS_GC_BITS(op, _PyGC_BITS_REACHABLE))
     {
         // If update_refs hasn't reached this object yet, mark it
         // as (tentatively) unreachable and initialize ob_tid to zero.
@@ -479,6 +482,11 @@ update_refs(const mi_heap_t *heap, const mi_heap_area_t *area,
 {
     PyObject *op = op_from_block(block, args, false);
     if (op == NULL) {
+        return true;
+    }
+
+    if (_PyObject_HAS_GC_BITS(op, _PyGC_BITS_REACHABLE)) {
+        // Already visited this object in this pass.
         return true;
     }
 
@@ -602,6 +610,11 @@ mark_heap_visitor(const mi_heap_t *heap, const mi_heap_area_t *area,
         return true;
     }
 
+    if (_PyObject_HAS_GC_BITS(op, _PyGC_BITS_REACHABLE)) {
+        _PyObject_CLEAR_GC_BITS(op, _PyGC_BITS_REACHABLE);
+        return true;
+    }
+
     _PyObject_ASSERT_WITH_MSG(op, gc_get_refs(op) >= 0,
                                   "refcount is too small");
 
@@ -687,6 +700,71 @@ static int
 move_legacy_finalizer_reachable(struct collection_state *state);
 
 static int
+visit_mark_reachable(PyObject *op, void *_arg)
+{
+    _PyObjectStack *stack = (_PyObjectStack *)_arg;
+    if (_PyObject_GC_IS_TRACKED(op) && 
+        !_PyObject_HAS_GC_BITS(op, _PyGC_BITS_REACHABLE))
+    {
+        _PyObject_SET_GC_BITS(op, _PyGC_BITS_REACHABLE);
+        return _PyObjectStack_Push(stack, op);
+    }
+    return 0;
+}
+
+static int
+gc_mark_obj(PyObject *op)
+{
+    if (!_PyObject_GC_IS_TRACKED(op)) {
+        return 0;
+    }
+    if (_PyObject_HAS_GC_BITS(op, _PyGC_BITS_REACHABLE)) {
+        return 0;
+    }
+
+    _PyObject_SET_GC_BITS(op, _PyGC_BITS_REACHABLE);
+    _PyObjectStack stack = {0};
+    do {
+        traverseproc traverse = Py_TYPE(op)->tp_traverse;
+        if (traverse(op, &visit_mark_reachable, &stack) < 0) {
+            return -1;
+        }
+        op = _PyObjectStack_Pop(&stack);
+    } while (op != NULL);
+    return 0;
+
+}
+
+static void
+gc_mark_stackref(_PyStackRef stackref)
+{
+    if (!PyStackRef_IsNull(stackref)) {
+        gc_mark_obj(PyStackRef_AsPyObjectBorrow(stackref));
+    }
+}
+
+static void
+gc_mark_stacks(PyInterpreterState *interp)
+{
+    _Py_FOR_EACH_TSTATE_BEGIN(interp, p) {
+        for (_PyInterpreterFrame *f = p->current_frame; f != NULL; f = f->previous) {
+            PyObject *executable = PyStackRef_AsPyObjectBorrow(f->f_executable);
+            if (executable == NULL || !PyCode_Check(executable)) {
+                continue;
+            }
+
+            PyCodeObject *co = (PyCodeObject *)executable;
+            int max_stack = co->co_nlocalsplus + co->co_stacksize;
+            gc_mark_stackref(f->f_executable);
+            for (int i = 0; i < max_stack; i++) {
+                gc_mark_stackref(f->localsplus[i]);
+            }
+        }
+    }
+    _Py_FOR_EACH_TSTATE_END(interp);
+}
+
+static int
 deduce_unreachable_heap(PyInterpreterState *interp,
                         struct collection_state *state)
 {
@@ -696,6 +774,14 @@ deduce_unreachable_heap(PyInterpreterState *interp,
     // reference count difference (stored in `ob_tid`) is non-negative.
     gc_visit_heaps(interp, &validate_refcounts, &state->base);
 #endif
+
+    PyTime_t start, end;
+    PyTime_MonotonicRaw(&start);
+    gc_mark_stacks(interp);
+    PyTime_MonotonicRaw(&end);
+    fprintf(stderr, "mark stacks took %3.1lf ms %ld ns\n", 
+        (double)(end - start) / 1000000.0,
+        end - start);
 
     // Identify objects that are directly reachable from outside the GC heap
     // by computing the difference between the refcount and the number of
@@ -983,7 +1069,7 @@ show_stats_each_generations(GCState *gcstate)
 
 // Traversal callback for handle_resurrected_objects.
 static int
-visit_decref_unreachable(PyObject *op, void *data)
+visit_decref_unreachable(PyObject *op, void *arg)
 {
     if (gc_is_unreachable(op) && _PyObject_GC_IS_TRACKED(op)) {
         op->ob_ref_local -= 1;
