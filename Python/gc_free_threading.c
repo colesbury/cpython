@@ -699,21 +699,87 @@ scan_heap_visitor(const mi_heap_t *heap, const mi_heap_area_t *area,
 static int
 move_legacy_finalizer_reachable(struct collection_state *state);
 
+#define BUFFER_SIZE 256
+#define BUFFER_LIMIT 64
+
+struct mark_entry {
+    uintptr_t start;
+    uintptr_t end;
+};
+
+struct mark_stack {
+    Py_ssize_t size;
+    Py_ssize_t capacity;
+    struct mark_entry *stack;
+};
+
+struct gc_mark_args {
+    Py_ssize_t enqueued;
+    Py_ssize_t dequeued;
+    PyObject *buffer[BUFFER_SIZE];
+    struct mark_stack stack;
+};
+
+// debugging stats
+static Py_ssize_t buffer_pushes;
+static Py_ssize_t stack_pushes;
+static Py_ssize_t non_gc_skips;
+
+static void
+push_mark_stack(struct mark_stack *ms, uintptr_t start, uintptr_t end)
+{
+    if (ms->size >= ms->capacity) {
+        if (ms->capacity == 0) {
+            ms->capacity = 256;
+        }
+        else {
+            ms->capacity *= 2;
+        }
+        ms->stack = (struct mark_entry *)PyMem_Realloc(ms->stack, ms->capacity * sizeof(struct mark_entry));
+        if (ms->stack == NULL) {
+            abort();
+        }
+    }
+    ms->stack[ms->size].start = start;
+    ms->stack[ms->size].end = end;
+    ms->size++;
+}
+
+static void
+push_mark_range(struct mark_stack *ms, PyObject **start, PyObject **end)
+{
+    push_mark_stack(ms, (uintptr_t)start, (uintptr_t)end);
+}
+
+static void
+push_mark_object(struct mark_stack *ms, PyObject *obj)
+{
+    push_mark_stack(ms, (uintptr_t)obj, 0);
+}
+
+// Subtract an incoming reference from the computed "gc_refs" refcount.
 static int
 visit_mark_reachable(PyObject *op, void *_arg)
 {
-    _PyObjectStack *stack = (_PyObjectStack *)_arg;
-    if (_PyObject_GC_IS_TRACKED(op) && 
-        !_PyObject_HAS_GC_BITS(op, _PyGC_BITS_REACHABLE))
-    {
-        _PyObject_SET_GC_BITS(op, _PyGC_BITS_REACHABLE);
-        return _PyObjectStack_Push(stack, op);
+    struct gc_mark_args *arg = _arg;
+
+    prefetch(op);
+    prefetch(op + 1);
+    if (arg->enqueued - arg->dequeued < BUFFER_SIZE) {
+        arg->buffer[arg->enqueued % BUFFER_SIZE] = op;
+        arg->enqueued++;
+        buffer_pushes++;
+        return 0;
     }
-    return 0;
+    else {
+        push_mark_object(&arg->stack, op);
+        stack_pushes++;
+        return 0;
+    }
 }
 
 static int
-gc_mark_obj(PyObject *op)
+gc_mark_obj(PyObject *op, struct gc_mark_args *args)
 {
     if (!_PyObject_GC_IS_TRACKED(op)) {
         return 0;
@@ -723,29 +789,95 @@ gc_mark_obj(PyObject *op)
     }
 
     _PyObject_SET_GC_BITS(op, _PyGC_BITS_REACHABLE);
-    _PyObjectStack stack = {0};
-    do {
-        traverseproc traverse = Py_TYPE(op)->tp_traverse;
-        if (traverse(op, &visit_mark_reachable, &stack) < 0) {
-            return -1;
-        }
-        op = _PyObjectStack_Pop(&stack);
-    } while (op != NULL);
+    traverseproc traverse = Py_TYPE(op)->tp_traverse;
+    if (traverse(op, &visit_mark_reachable, args) < 0) {
+        return -1;
+    }
     return 0;
 
 }
 
 static void
-gc_mark_stackref(_PyStackRef stackref)
+gc_mark_stackref(_PyStackRef stackref, struct gc_mark_args *args)
 {
     if (!PyStackRef_IsNull(stackref)) {
-        gc_mark_obj(PyStackRef_AsPyObjectBorrow(stackref));
+        gc_mark_obj(PyStackRef_AsPyObjectBorrow(stackref), args);
     }
+}
+
+static int
+mark_some_more(struct gc_mark_args *args, int limit)
+{
+    struct mark_entry entry;
+    while (1) {
+        if (args->enqueued - args->dequeued > limit) {
+            PyObject *op = args->buffer[args->dequeued % BUFFER_SIZE];
+            args->dequeued++;
+            entry.start = (uintptr_t)op;
+            entry.end = 0;
+        }
+        else if (args->stack.size > 0) {
+            entry = args->stack.stack[--args->stack.size];
+        }
+        else {
+            break;
+        }
+
+        if (entry.end == 0) {
+            PyObject *op = (PyObject *)entry.start;
+            if (!_PyObject_GC_IS_TRACKED(op)) {
+                continue;
+            }
+            if (_PyObject_HAS_GC_BITS(op, _PyGC_BITS_REACHABLE)) {
+                continue;
+            }
+            _PyObject_SET_GC_BITS(op, _PyGC_BITS_REACHABLE);
+
+            traverseproc traverse = Py_TYPE(op)->tp_traverse;
+            if (traverse == PyList_Type.tp_traverse) {
+                PyListObject *list = (PyListObject *)op;
+                if (list->ob_item == NULL) {
+                    continue;
+                }
+                entry.start = list->ob_item;
+                entry.end = list->ob_item + Py_SIZE(op);
+            }
+            else {
+                traverse(op, &visit_mark_reachable, args);
+                continue;
+            }
+        }
+
+        while (entry.start < entry.end) {
+            PyObject *op = *(PyObject **)entry.start;
+            if (op == NULL) {
+                entry.start += sizeof(PyObject *);
+                continue;
+            }
+            if (args->enqueued - args->dequeued < BUFFER_SIZE) {
+                prefetch(op);
+                args->buffer[args->enqueued % BUFFER_SIZE] = op;
+                args->enqueued++;
+                buffer_pushes++;
+            }
+            else {
+                // If the prefetch buffer is full, push the remaining parts
+                // of the mark entry back onto the stack and process the buffer.
+                push_mark_stack(&args->stack, entry.start, entry.end);
+                stack_pushes++;
+                break;
+            }
+            entry.start += sizeof(PyObject *);
+        }
+    }
+    return 0;
 }
 
 static void
 gc_mark_stacks(PyInterpreterState *interp)
 {
+    struct gc_mark_args args = { 0 };
+
     _Py_FOR_EACH_TSTATE_BEGIN(interp, p) {
         for (_PyInterpreterFrame *f = p->current_frame; f != NULL; f = f->previous) {
             PyObject *executable = PyStackRef_AsPyObjectBorrow(f->f_executable);
@@ -755,13 +887,20 @@ gc_mark_stacks(PyInterpreterState *interp)
 
             PyCodeObject *co = (PyCodeObject *)executable;
             int max_stack = co->co_nlocalsplus + co->co_stacksize;
-            gc_mark_stackref(f->f_executable);
+            gc_mark_stackref(f->f_executable, &args);
             for (int i = 0; i < max_stack; i++) {
-                gc_mark_stackref(f->localsplus[i]);
+                mark_some_more(&args, BUFFER_LIMIT);
+                gc_mark_stackref(f->localsplus[i], &args);
             }
+
+            mark_some_more(&args, BUFFER_LIMIT);
         }
     }
     _Py_FOR_EACH_TSTATE_END(interp);
+
+    while (args.enqueued > args.dequeued) {
+        mark_some_more(&args, 0);
+    }
 }
 
 static int
@@ -779,9 +918,14 @@ deduce_unreachable_heap(PyInterpreterState *interp,
     PyTime_MonotonicRaw(&start);
     gc_mark_stacks(interp);
     PyTime_MonotonicRaw(&end);
-    fprintf(stderr, "mark stacks took %3.1lf ms %ld ns\n", 
+    double ratio = (double)buffer_pushes / (1+stack_pushes);
+    fprintf(stderr, "mark stacks took %3.1lf ms %ld ns (buffer=%zd stack=%zd, ratio=%2.2lf) non_gc_skips=%ld\n", 
         (double)(end - start) / 1000000.0,
-        end - start);
+        end - start,
+        buffer_pushes, stack_pushes, ratio,
+        non_gc_skips);
+    buffer_pushes = stack_pushes = 0;
+    non_gc_skips = 0;
 
     // Identify objects that are directly reachable from outside the GC heap
     // by computing the difference between the refcount and the number of
