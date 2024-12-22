@@ -9402,7 +9402,7 @@ then
 	    if test "$Py_DEBUG" = 'true' ; then
 		OPT="-g $PYDEBUG_CFLAGS -Wall"
 	    else
-		OPT="-g -O3 -Wall"
+		OPT="-g -O3 -Wall -Wa,-mbranches-within-32B-boundaries"
 	    fi
 	    ;;
 	*)
