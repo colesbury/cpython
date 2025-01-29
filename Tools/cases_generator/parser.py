@@ -3,7 +3,6 @@ from parsing import (  # noqa: F401
     Macro,
     Pseudo,
     Family,
-    LabelDef,
     Parser,
     Context,
     CacheEffect,

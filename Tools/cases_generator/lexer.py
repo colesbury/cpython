@@ -213,9 +213,6 @@ kwds.append(OP)
 # A macro in the DSL
 MACRO = "MACRO"
 kwds.append(MACRO)
-# A label in the DSL
-LABEL = "LABEL"
-kwds.append(LABEL)
 keywords = {name.lower(): name for name in kwds}
 
 ANNOTATION = "ANNOTATION"
