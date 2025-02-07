@@ -235,10 +235,10 @@ managed_static_type_state_init(PyInterpreterState *interp, PyTypeObject *self,
         ? index
         : index + _Py_MAX_MANAGED_STATIC_BUILTIN_TYPES;
 
-    assert((initial == 1) ==
-            (_PyRuntime.types.managed_static.types[full_index].interp_count == 0));
-    (void)_Py_atomic_add_int64(
+    int64_t prev_interp_count = _Py_atomic_add_int64(
             &_PyRuntime.types.managed_static.types[full_index].interp_count, 1);
+    assert((initial == 1) == (prev_interp_count == 0));
+    (void)prev_interp_count;
 
     if (initial) {
         assert(_PyRuntime.types.managed_static.types[full_index].type == NULL);
@@ -8581,12 +8581,22 @@ type_ready_set_new(PyTypeObject *type, int initial)
         }
         else {
             // tp_new is NULL: inherit tp_new from base
-            type->tp_new = base->tp_new;
+            if (initial) {
+                type->tp_new = base->tp_new;
+            }
+            else {
+                assert(type->tp_new == base->tp_new);
+            }
         }
     }
     else {
         // Py_TPFLAGS_DISALLOW_INSTANTIATION sets tp_new to NULL
-        type->tp_new = NULL;
+        if (initial) {
+            type->tp_new = NULL;
+        }
+        else {
+            assert(type->tp_new == NULL);
+        }
     }
     return 0;
 }
