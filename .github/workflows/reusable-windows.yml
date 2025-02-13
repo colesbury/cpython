@@ -46,6 +46,15 @@ jobs:
     - name: Display build info  # FIXME(diegorusso): remove the `if`
       if: inputs.arch != 'arm64'
       run: .\\python.bat -m test.pythoninfo
+    - name: Python Info
+      run: .\\python.bat -VVV
+    - name: Test Queue
+      run: >-
+        .\\PCbuild\\rt.bat
+        -p "${ARCH}"
+        -d -q test_queue -v
+        ${{ fromJSON(inputs.free-threading) && '--disable-gil' || '' }}
+      shell: bash
     - name: Tests  # FIXME(diegorusso): remove the `if`
       if: inputs.arch != 'arm64'
       run: >-
