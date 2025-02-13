@@ -43,6 +43,10 @@ jobs:
         -p "${ARCH}"
         ${{ fromJSON(inputs.free-threading) && '--disable-gil' || '' }}
       shell: bash
+    - name: Upload Artifact
+      uses: actions/upload-artifact@v4
+      with:
+        path: PCBuild/amd64
     - name: Display build info  # FIXME(diegorusso): remove the `if`
       if: inputs.arch != 'arm64'
       run: .\\python.bat -m test.pythoninfo
