@@ -39,7 +39,7 @@ jobs:
     - name: Build CPython
       run: >-
         .\\PCbuild\\build.bat
-        -e -d -v
+        -e -v
         -p "${ARCH}"
         ${{ fromJSON(inputs.free-threading) && '--disable-gil' || '' }}
       shell: bash
@@ -56,7 +56,7 @@ jobs:
       run: >-
         .\\PCbuild\\rt.bat
         -p "${ARCH}"
-        -d -q test_queue -v
+        -q test_queue -v
         ${{ fromJSON(inputs.free-threading) && '--disable-gil' || '' }}
       shell: bash
     - name: Tests  # FIXME(diegorusso): remove the `if`
@@ -64,6 +64,6 @@ jobs:
       run: >-
         .\\PCbuild\\rt.bat
         -p "${ARCH}"
-        -d -q --fast-ci
+        -q --fast-ci
         ${{ fromJSON(inputs.free-threading) && '--disable-gil' || '' }}
       shell: bash
