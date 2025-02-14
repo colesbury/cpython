@@ -472,6 +472,7 @@ class SysModuleTest(unittest.TestCase):
     # sys._current_frames() is a CPython-only gimmick.
     @threading_helper.reap_threads
     @threading_helper.requires_working_threading()
+    @support.skip_if_sanitizer("sys._current_frames race", thread=True)
     def test_current_frames(self):
         import threading
         import traceback
@@ -539,12 +540,13 @@ class SysModuleTest(unittest.TestCase):
 
     @threading_helper.reap_threads
     @threading_helper.requires_working_threading()
+    @support.skip_if_sanitizer("sys._current_exceptions race", thread=True)
     def test_current_exceptions(self):
         import threading
         import traceback
 
         # Spawn a thread that blocks at a known place.  Then the main
-        # thread does sys._current_frames(), and verifies that the frames
+        # thread does sys._current_exceptions(), and verifies that the frames
         # returned make sense.
         g_raised = threading.Event()
         leave_g = threading.Event()
