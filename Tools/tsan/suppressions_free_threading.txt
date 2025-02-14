@@ -6,22 +6,8 @@
 
 ## Free-threaded suppressions
 
-
-# These entries are for warnings that trigger in a library function, as called
-# by a CPython function.
-
-# These warnings trigger directly in a CPython function.
-
-race_top:assign_version_tag
-race_top:_Py_slot_tp_getattr_hook
-race_top:dump_traceback
-race_top:fatal_error
-race_top:_PyFrame_GetCode
-race_top:_PyFrame_Initialize
-race_top:_PyObject_TryGetInstanceAttribute
-race_top:PyUnstable_InterpreterFrame_GetLine
-race_top:type_modified_unlocked
-race_top:write_thread_id
+# gh-xxxxxx: faulthandler is not thread-safe even with the GIL
+race:_Py_DumpTracebackThreads
 
 # gh-129068: race on shared range iterators (test_free_threading.test_zip.ZipThreading.test_threading)
 race_top:rangeiter_next
