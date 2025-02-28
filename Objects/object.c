@@ -2981,6 +2981,16 @@ _PyObject_AssertFailed(PyObject *obj, const char *expr, const char *msg,
     Py_FatalError("_PyObject_AssertFailed");
 }
 
+// gh-130706: The reftracer call is in a non-inlined function to avoid extra
+// register spills in the fast path of _Py_Dealloc and
+// _Py_MergeZeroLocalRefcount in the free threading build.
+Py_NO_INLINE static void
+dealloc_with_reftracer(PyObject *op)
+{
+    void *data = _PyRuntime.ref_tracer.tracer_data;
+    _PyRuntime.ref_tracer.tracer_func(op, PyRefTracer_DESTROY, data);
+    Py_TYPE(op)->tp_dealloc(op);
+}
 
 void
 _Py_Dealloc(PyObject *op)
@@ -3005,8 +3015,12 @@ _Py_Dealloc(PyObject *op)
 #ifdef Py_TRACE_REFS
     _Py_ForgetReference(op);
 #endif
-    _PyReftracerTrack(op, PyRefTracer_DESTROY);
-    (*dealloc)(op);
+    if (_PyRuntime.ref_tracer.tracer_func != NULL) {
+        dealloc_with_reftracer(op);
+    }
+    else {
+        Py_TYPE(op)->tp_dealloc(op);
+    }
 
 #ifdef Py_DEBUG
     // gh-89373: The tp_dealloc function must leave the current exception
