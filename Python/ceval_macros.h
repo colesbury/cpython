@@ -363,6 +363,17 @@ static inline void _Py_LeaveRecursiveCallPy(PyThreadState *tstate)  {
     tstate->py_recursion_remaining++;
 }
 
+static inline int
+_PyGen_PrepareSend(PyGenObject *gen)
+{
+    assert(PyGen_CheckExact(gen) || PyCoro_CheckExact(gen));
+    int8_t frame_state = FT_ATOMIC_LOAD_INT8_RELAXED(gen->gi_frame_state);
+    if (frame_state >= FRAME_EXECUTING) {
+        return 0;
+    }
+    return _PyGen_TransitionFrameState(gen, &frame_state, FRAME_EXECUTING);
+}
+
 /* Implementation of "macros" that modify the instruction pointer,
  * stack pointer, or frame pointer.
  * These need to treated differently by tier 1 and 2.
