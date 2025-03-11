@@ -1740,13 +1740,15 @@ clear_gen_frame(PyThreadState *tstate, _PyInterpreterFrame * frame)
 {
     assert(frame->owner == FRAME_OWNED_BY_GENERATOR);
     PyGenObject *gen = _PyGen_GetGeneratorFromFrame(frame);
-    gen->gi_frame_state = FRAME_CLEARED;
     assert(tstate->exc_info == &gen->gi_exc_state);
     tstate->exc_info = gen->gi_exc_state.previous_item;
+    PyObject *exc_value = gen->gi_exc_state.exc_value;
     gen->gi_exc_state.previous_item = NULL;
+    gen->gi_exc_state.exc_value = NULL;
     assert(frame->frame_obj == NULL || frame->frame_obj->f_frame == frame);
+    _PyGen_SetFrameState(gen, FRAME_CLEARED);
     _PyFrame_ClearExceptCode(frame);
-    _PyErr_ClearExcState(&gen->gi_exc_state);
+    Py_XDECREF(exc_value);
     frame->previous = NULL;
 }
 

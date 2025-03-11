@@ -1054,6 +1054,19 @@ _Py_atomic_store_uintptr_release(uintptr_t *obj, uintptr_t value)
 }
 
 static inline void
+_Py_atomic_store_int8_release(int8_t *obj, int8_t value)
+{
+#if defined(_M_X64) || defined(_M_IX86)
+    *(int8_t volatile *)obj = value;
+#elif defined(_M_ARM64)
+    _Py_atomic_ASSERT_ARG_TYPE(unsigned __int8);
+    __stlr8((unsigned __int8 volatile *)obj, (unsigned __int8)value);
+#else
+#  error "no implementation of _Py_atomic_store_int8_release"
+#endif
+}
+
+static inline void
 _Py_atomic_store_int_release(int *obj, int value)
 {
 #if defined(_M_X64) || defined(_M_IX86)

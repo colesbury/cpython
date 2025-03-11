@@ -192,9 +192,12 @@ gen_send_ex2(PyGenObject *gen, PyObject *arg, PyObject **presult,
 {
     PyThreadState *tstate = _PyThreadState_GET();
     _PyInterpreterFrame *frame = &gen->gi_iframe;
+    int8_t frame_state;
 
     *presult = NULL;
-    if (gen->gi_frame_state == FRAME_CREATED && arg && arg != Py_None) {
+retry:
+    frame_state = FT_ATOMIC_LOAD_INT8_RELAXED(gen->gi_frame_state);
+    if (frame_state == FRAME_CREATED && arg && arg != Py_None) {
         const char *msg = "can't send non-None value to a "
                             "just-started generator";
         if (PyCoro_CheckExact(gen)) {
@@ -207,7 +210,7 @@ gen_send_ex2(PyGenObject *gen, PyObject *arg, PyObject **presult,
         PyErr_SetString(PyExc_TypeError, msg);
         return PYGEN_ERROR;
     }
-    if (gen->gi_frame_state == FRAME_EXECUTING) {
+    if (frame_state == FRAME_EXECUTING) {
         const char *msg = "generator already executing";
         if (PyCoro_CheckExact(gen)) {
             msg = "coroutine already executing";
@@ -218,7 +221,7 @@ gen_send_ex2(PyGenObject *gen, PyObject *arg, PyObject **presult,
         PyErr_SetString(PyExc_ValueError, msg);
         return PYGEN_ERROR;
     }
-    if (FRAME_STATE_FINISHED(gen->gi_frame_state)) {
+    if (FRAME_STATE_FINISHED(frame_state)) {
         if (PyCoro_CheckExact(gen) && !closing) {
             /* `gen` is an exhausted coroutine: raise an error,
                except when called from gen_close(), which should
@@ -236,8 +239,12 @@ gen_send_ex2(PyGenObject *gen, PyObject *arg, PyObject **presult,
         return PYGEN_ERROR;
     }
 
-    assert((gen->gi_frame_state == FRAME_CREATED) ||
-           FRAME_STATE_SUSPENDED(gen->gi_frame_state));
+    assert((frame_state == FRAME_CREATED) ||
+            FRAME_STATE_SUSPENDED(frame_state));
+
+    if (!_PyGen_TransitionFrameState(gen, &frame_state, FRAME_EXECUTING)) {
+        goto retry;
+    }
 
     /* Push arg onto the frame's value stack */
     PyObject *arg_obj = arg ? arg : Py_None;
@@ -247,23 +254,36 @@ gen_send_ex2(PyGenObject *gen, PyObject *arg, PyObject **presult,
     gen->gi_exc_state.previous_item = prev_exc_info;
     tstate->exc_info = &gen->gi_exc_state;
 
+#ifdef Py_GIL_DISABLED
+    /* Store the resulting frame_state in frame_state */
+    assert(gen->gi_out_frame_state == NULL);
+    gen->gi_out_frame_state = &frame_state;
+#endif
+
     if (exc) {
         assert(_PyErr_Occurred(tstate));
         _PyErr_ChainStackItem();
     }
 
-    gen->gi_frame_state = FRAME_EXECUTING;
     EVAL_CALL_STAT_INC(EVAL_CALL_GENERATOR);
     PyObject *result = _PyEval_EvalFrame(tstate, frame, exc);
-    assert(tstate->exc_info == prev_exc_info);
-    assert(gen->gi_exc_state.previous_item == NULL);
-    assert(gen->gi_frame_state != FRAME_EXECUTING);
+
+#ifndef Py_GIL_DISABLED
+    frame_state = gen->gi_frame_state;
+
+    // These asserts are not thread-safe in the free threaded build. Some
+    // other thread can immediately start executing the generator here.
     assert(frame->previous == NULL);
+    assert(gen->gi_exc_state.previous_item == NULL);
+#endif
+
+    assert(tstate->exc_info == prev_exc_info);
+    assert(frame_state != FRAME_EXECUTING);
 
     /* If the generator just returned (as opposed to yielding), signal
      * that the generator is exhausted. */
     if (result) {
-        if (FRAME_STATE_SUSPENDED(gen->gi_frame_state)) {
+        if (FRAME_STATE_SUSPENDED(frame_state)) {
             *presult = result;
             return PYGEN_NEXT;
         }
@@ -279,8 +299,10 @@ gen_send_ex2(PyGenObject *gen, PyObject *arg, PyObject **presult,
             !PyErr_ExceptionMatches(PyExc_StopAsyncIteration));
     }
 
+#ifndef Py_GIL_DISABLED
     assert(gen->gi_exc_state.exc_value == NULL);
-    assert(gen->gi_frame_state == FRAME_CLEARED);
+#endif
+    assert(frame_state == FRAME_CLEARED);
     *presult = result;
     return result ? PYGEN_RETURN : PYGEN_ERROR;
 }
@@ -920,6 +942,9 @@ make_gen(PyTypeObject *type, PyFunctionObject *func)
     gen->gi_weakreflist = NULL;
     gen->gi_exc_state.exc_value = NULL;
     gen->gi_exc_state.previous_item = NULL;
+#ifdef Py_GIL_DISABLED
+    gen->gi_out_frame_state = NULL;
+#endif
     assert(func->func_name != NULL);
     gen->gi_name = Py_NewRef(func->func_name);
     assert(func->func_qualname != NULL);
@@ -1003,6 +1028,9 @@ gen_new_with_qualname(PyTypeObject *type, PyFrameObject *f,
     gen->gi_weakreflist = NULL;
     gen->gi_exc_state.exc_value = NULL;
     gen->gi_exc_state.previous_item = NULL;
+#ifdef Py_GIL_DISABLED
+    gen->gi_out_frame_state = NULL;
+#endif
     if (name != NULL)
         gen->gi_name = Py_NewRef(name);
     else

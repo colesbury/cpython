@@ -53,6 +53,11 @@ struct _PyInterpreterFrame {
     _PyStackRef localsplus[1];
 };
 
+#ifdef Py_GIL_DISABLED
+# define _PY_GEN_OUT_FRAME_STATE(prefix) int8_t *prefix##_out_frame_state
+#else
+# define _PY_GEN_OUT_FRAME_STATE(prefix)
+#endif
 
 /* _PyGenObject_HEAD defines the initial segment of generator
    and coroutine objects. */
@@ -66,6 +71,7 @@ struct _PyInterpreterFrame {
     PyObject *prefix##_qualname;                                            \
     _PyErr_StackItem prefix##_exc_state;                                    \
     PyObject *prefix##_origin_or_finalizer;                                 \
+    _PY_GEN_OUT_FRAME_STATE(prefix);                                        \
     char prefix##_hooks_inited;                                             \
     char prefix##_closed;                                                   \
     char prefix##_running_async;                                            \
