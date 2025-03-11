@@ -12,6 +12,12 @@ extern "C" {
 #include "pycore_typedefs.h"      // _PyInterpreterFrame
 
 
+#ifdef Py_GIL_DISABLED
+# define _PY_GEN_OUT_FRAME_STATE(prefix) int8_t *prefix##_out_frame_state;
+#else
+# define _PY_GEN_OUT_FRAME_STATE(prefix)
+#endif
+
 /* _PyGenObject_HEAD defines the initial segment of generator
    and coroutine objects. */
 #define _PyGenObject_HEAD(prefix)                                           \
@@ -24,6 +30,7 @@ extern "C" {
     PyObject *prefix##_qualname;                                            \
     _PyErr_StackItem prefix##_exc_state;                                    \
     PyObject *prefix##_origin_or_finalizer;                                 \
+    _PY_GEN_OUT_FRAME_STATE(prefix)                                         \
     char prefix##_hooks_inited;                                             \
     char prefix##_closed;                                                   \
     char prefix##_running_async;                                            \
@@ -52,6 +59,32 @@ PyGenObject *_PyGen_GetGeneratorFromFrame(_PyInterpreterFrame *frame)
     assert(frame->owner == FRAME_OWNED_BY_GENERATOR);
     size_t offset_in_gen = offsetof(PyGenObject, gi_iframe);
     return (PyGenObject *)(((char *)frame) - offset_in_gen);
+}
+
+static inline void
+_PyGen_SetFrameState(PyGenObject *gen, int8_t state)
+{
+#ifdef Py_GIL_DISABLED
+    if (gen->gi_out_frame_state) {
+        *gen->gi_out_frame_state = state;
+        gen->gi_out_frame_state = NULL;
+    }
+    _Py_atomic_store_int8(&gen->gi_frame_state, state);
+#else
+    gen->gi_frame_state = state;
+#endif
+}
+
+static inline int
+_PyGen_TransitionFrameState(PyGenObject *gen, int8_t *from_state, int8_t state)
+{
+#ifdef Py_GIL_DISABLED
+    return _Py_atomic_compare_exchange_int8(&gen->gi_frame_state, from_state, state);
+#else
+    assert(gen->gi_frame_state == *from_state);
+    gen->gi_frame_state = state;
+    return 1;
+#endif
 }
 
 PyAPI_FUNC(PyObject *)_PyGen_yf(PyGenObject *);
