@@ -126,6 +126,23 @@
         } \
     } while (0)
 
+#undef Py_INCREF
+#define Py_INCREF(arg) \
+    do { \
+        PyObject *op = _PyObject_CAST(arg); \
+        uint32_t local = _Py_atomic_load_uint32_relaxed(&op->ob_ref_local); \
+        uint32_t new_local = local + 1; \
+        if (new_local == 0) { \
+            _Py_INCREF_IMMORTAL_STAT_INC(); \
+        } \
+        else if (_Py_IsOwnedByCurrentThread(op)) { \
+            _Py_atomic_store_uint32_relaxed(&op->ob_ref_local, new_local); \
+        } \
+        else { \
+            _Py_atomic_add_ssize(&op->ob_ref_shared, (1 << _Py_REF_SHARED_SHIFT)); \
+        } \
+    } while (0)
+
 #undef _Py_DECREF_SPECIALIZED
 #define _Py_DECREF_SPECIALIZED(arg, dealloc) Py_DECREF(arg)
 
@@ -947,7 +964,9 @@ _PyObjectArray_Free(PyObject **array, PyObject **scratch)
 
 #if Py_TAIL_CALL_INTERP
 #include "opcode_targets.h"
+#define _Py_IsOwnedByCurrentThread(op) ((op)->ob_tid == tid)
 #include "generated_cases.c.h"
+#undef _Py_IsOwnedByCurrentThread
 #endif
 
 PyObject* _Py_HOT_FUNCTION
@@ -1028,7 +1047,7 @@ _PyEval_EvalFrameDefault(PyThreadState *tstate, _PyInterpreterFrame *frame, int 
         monitor_throw(tstate, frame, next_instr);
         stack_pointer = _PyFrame_GetStackPointer(frame);
 #if Py_TAIL_CALL_INTERP
-        return _TAIL_CALL_error(frame, stack_pointer, tstate, next_instr, 0);
+        return _TAIL_CALL_error(frame, tstate, _Py_ThreadId(), next_instr, 0, stack_pointer);
 #else
         goto error;
 #endif
@@ -1041,7 +1060,7 @@ _PyEval_EvalFrameDefault(PyThreadState *tstate, _PyInterpreterFrame *frame, int 
 #endif
 
 #if Py_TAIL_CALL_INTERP
-    return _TAIL_CALL_start_frame(frame, NULL, tstate, NULL, 0);
+    return _TAIL_CALL_start_frame(frame, tstate, _Py_ThreadId(), NULL, 0, NULL);
 #else
     goto start_frame;
 #   include "generated_cases.c.h"
