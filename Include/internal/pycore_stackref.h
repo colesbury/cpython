@@ -306,19 +306,16 @@ PyStackRef_CLOSE_SPECIALIZED(_PyStackRef ref, destructor destruct)
     PyStackRef_CLOSE(ref);
 }
 
-static inline _PyStackRef
-PyStackRef_DUP(_PyStackRef stackref)
-{
-    assert(!PyStackRef_IsNull(stackref));
-    if (PyStackRef_IsDeferred(stackref)) {
-        assert(_Py_IsImmortal(PyStackRef_AsPyObjectBorrow(stackref)) ||
-               _PyObject_HasDeferredRefcount(PyStackRef_AsPyObjectBorrow(stackref))
-        );
-        return stackref;
-    }
-    Py_INCREF(PyStackRef_AsPyObjectBorrow(stackref));
-    return stackref;
-}
+// use gcc expression statements
+#define PyStackRef_DUP(stackref) \
+    ({ \
+        _PyStackRef _tmp = (stackref); \
+        assert(!PyStackRef_IsNull(_tmp)); \
+        if (!PyStackRef_IsDeferred(_tmp)) { \
+            Py_INCREF(PyStackRef_AsPyObjectBorrow(_tmp)); \
+        } \
+        _tmp; \
+    })
 
 static inline bool
 PyStackRef_IsHeapSafe(_PyStackRef ref)
