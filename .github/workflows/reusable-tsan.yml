@@ -34,14 +34,14 @@ jobs:
     - name: Install dependencies
       run: |
         sudo ./.github/workflows/posix-deps-apt.sh
-        # Install clang-18
+        # Install clang
         wget https://apt.llvm.org/llvm.sh
         chmod +x llvm.sh
-        sudo ./llvm.sh 17  # gh-121946: llvm-18 package is temporarily broken
-        sudo update-alternatives --install /usr/bin/clang clang /usr/bin/clang-17 100
-        sudo update-alternatives --set clang /usr/bin/clang-17
-        sudo update-alternatives --install /usr/bin/clang++ clang++ /usr/bin/clang++-17 100
-        sudo update-alternatives --set clang++ /usr/bin/clang++-17
+        sudo ./llvm.sh 20
+        sudo update-alternatives --install /usr/bin/clang clang /usr/bin/clang-20 100
+        sudo update-alternatives --set clang /usr/bin/clang-20
+        sudo update-alternatives --install /usr/bin/clang++ clang++ /usr/bin/clang++-20 100
+        sudo update-alternatives --set clang++ /usr/bin/clang++-20
         # Reduce ASLR to avoid TSAN crashing
         sudo sysctl -w vm.mmap_rnd_bits=28
     - name: TSAN option setup
