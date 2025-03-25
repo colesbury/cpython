@@ -1049,6 +1049,7 @@ frame_builtins_get_impl(PyFrameObject *self)
 }
 
 /*[clinic input]
+@critical_section
 @getter
 frame.f_code as frame_code
 
@@ -1057,7 +1058,7 @@ Return the code object being executed in this frame.
 
 static PyObject *
 frame_code_get_impl(PyFrameObject *self)
-/*[clinic end generated code: output=a5ed6207395a8cef input=e127e7098c124816]*/
+/*[clinic end generated code: output=a5ed6207395a8cef input=4808895ed6ef24f7]*/
 {
     if (PySys_Audit("object.__getattr__", "Os", self, "f_code") < 0) {
         return NULL;
@@ -2335,12 +2336,10 @@ PyCodeObject *
 PyFrame_GetCode(PyFrameObject *frame)
 {
     assert(frame != NULL);
-    PyObject *code;
-    Py_BEGIN_CRITICAL_SECTION(frame);
     assert(!_PyFrame_IsIncomplete(frame->f_frame));
-    code = Py_NewRef(_PyFrame_GetCode(frame->f_frame));
-    Py_END_CRITICAL_SECTION();
-    return (PyCodeObject *)code;
+    PyCodeObject *code = _PyFrame_GetCode(frame->f_frame);
+    assert(code != NULL);
+    return (PyCodeObject*)Py_NewRef(code);
 }
 
 
@@ -2384,13 +2383,12 @@ PyFrame_GetBuiltins(PyFrameObject *frame)
 int
 PyFrame_GetLasti(PyFrameObject *frame)
 {
-    int ret;
-    Py_BEGIN_CRITICAL_SECTION(frame);
     assert(!_PyFrame_IsIncomplete(frame->f_frame));
     int lasti = _PyInterpreterFrame_LASTI(frame->f_frame);
-    ret = lasti < 0 ? -1 : lasti * (int)sizeof(_Py_CODEUNIT);
-    Py_END_CRITICAL_SECTION();
-    return ret;
+    if (lasti < 0) {
+        return -1;
+    }
+    return lasti * sizeof(_Py_CODEUNIT);
 }
 
 PyObject *

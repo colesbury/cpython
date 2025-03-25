@@ -44,7 +44,7 @@ _PyFrame_MakeAndSetFrameObject(_PyInterpreterFrame *frame)
     return f;
 }
 
-static void
+static void Py_NO_INLINE
 take_ownership(PyFrameObject *f, _PyInterpreterFrame *frame)
 {
     Py_BEGIN_CRITICAL_SECTION(f);

@@ -187,7 +187,13 @@ frame_code_get_impl(PyFrameObject *self);
 static PyObject *
 frame_code_get(PyObject *self, void *Py_UNUSED(context))
 {
-    return frame_code_get_impl((PyFrameObject *)self);
+    PyObject *return_value = NULL;
+
+    Py_BEGIN_CRITICAL_SECTION(self);
+    return_value = frame_code_get_impl((PyFrameObject *)self);
+    Py_END_CRITICAL_SECTION();
+
+    return return_value;
 }
 
 #if !defined(frame_back_DOCSTR)
@@ -433,4 +439,4 @@ frame___sizeof__(PyObject *self, PyObject *Py_UNUSED(ignored))
 
     return return_value;
 }
-/*[clinic end generated code: output=74abf652547c0c11 input=a9049054013a1b77]*/
+/*[clinic end generated code: output=63a446d4e3b63955 input=a9049054013a1b77]*/
