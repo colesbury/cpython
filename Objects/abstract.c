@@ -94,7 +94,7 @@ _PyObject_HasLen(PyObject *o) {
 Py_ssize_t
 PyObject_LengthHint(PyObject *o, Py_ssize_t defaultvalue)
 {
-    PyObject *hint, *result;
+    PyObject *result;
     Py_ssize_t res;
     if (_PyObject_HasLen(o)) {
         res = PyObject_Length(o);
@@ -110,24 +110,18 @@ PyObject_LengthHint(PyObject *o, Py_ssize_t defaultvalue)
             return res;
         }
     }
-    hint = _PyObject_LookupSpecial(o, &_Py_ID(__length_hint__));
-    if (hint == NULL) {
-        if (PyErr_Occurred()) {
-            return -1;
-        }
-        return defaultvalue;
-    }
-    result = _PyObject_CallNoArgs(hint);
-    Py_DECREF(hint);
+    result = _PyObject_MaybeCallSpecialNoArgs(o, &_Py_ID(__length_hint__));
     if (result == NULL) {
         PyThreadState *tstate = _PyThreadState_GET();
         if (_PyErr_ExceptionMatches(tstate, PyExc_TypeError)) {
             _PyErr_Clear(tstate);
-            return defaultvalue;
         }
-        return -1;
+        else if (_PyErr_Occurred(tstate)) {
+            return -1;
+        }
+        return defaultvalue;
     }
-    else if (result == Py_NotImplemented) {
+    if (result == Py_NotImplemented) {
         Py_DECREF(result);
         return defaultvalue;
     }
@@ -842,10 +836,6 @@ _PyBuffer_ReleaseInInterpreterAndRawFree(PyInterpreterState *interp,
 PyObject *
 PyObject_Format(PyObject *obj, PyObject *format_spec)
 {
-    PyObject *meth;
-    PyObject *empty = NULL;
-    PyObject *result = NULL;
-
     if (format_spec != NULL && !PyUnicode_Check(format_spec)) {
         PyErr_Format(PyExc_SystemError,
                      "Format specifier must be a string, not %.200s",
@@ -865,36 +855,28 @@ PyObject_Format(PyObject *obj, PyObject *format_spec)
 
     /* If no format_spec is provided, use an empty string */
     if (format_spec == NULL) {
-        empty = Py_GetConstant(Py_CONSTANT_EMPTY_STR);
-        format_spec = empty;
+        format_spec = Py_GetConstant(Py_CONSTANT_EMPTY_STR);
     }
 
-    /* Find the (unbound!) __format__ method */
-    meth = _PyObject_LookupSpecial(obj, &_Py_ID(__format__));
-    if (meth == NULL) {
+    /* Call the __format__ method if it exists */
+    PyObject *result = _PyObject_MaybeCallSpecialOneArg(obj, &_Py_ID(__format__),
+                                                        format_spec);
+    if (result == NULL) {
         PyThreadState *tstate = _PyThreadState_GET();
         if (!_PyErr_Occurred(tstate)) {
             _PyErr_Format(tstate, PyExc_TypeError,
                           "Type %.100s doesn't define __format__",
                           Py_TYPE(obj)->tp_name);
         }
-        goto done;
+        return NULL;
     }
-
-    /* And call it. */
-    result = PyObject_CallOneArg(meth, format_spec);
-    Py_DECREF(meth);
-
-    if (result && !PyUnicode_Check(result)) {
+    if (!PyUnicode_Check(result)) {
         PyErr_Format(PyExc_TypeError,
                      "__format__ must return a str, not %.200s",
                      Py_TYPE(result)->tp_name);
-        Py_SETREF(result, NULL);
-        goto done;
+        Py_DECREF(result);
+        return NULL;
     }
-
-done:
-    Py_XDECREF(empty);
     return result;
 }
 /* Operations on numbers */
@@ -2645,12 +2627,13 @@ object_recursive_isinstance(PyThreadState *tstate, PyObject *inst, PyObject *cls
         cls = _Py_union_args(cls);
     }
 
+    if (_Py_EnterRecursiveCallTstate(tstate, " in __instancecheck__")) {
+        return -1;
+    }
+
     if (PyTuple_Check(cls)) {
         /* Not a general sequence -- that opens up the road to
            recursion and stack overflow. */
-        if (_Py_EnterRecursiveCallTstate(tstate, " in __instancecheck__")) {
-            return -1;
-        }
         Py_ssize_t n = PyTuple_GET_SIZE(cls);
         int r = 0;
         for (Py_ssize_t i = 0; i < n; ++i) {
@@ -2661,30 +2644,16 @@ object_recursive_isinstance(PyThreadState *tstate, PyObject *inst, PyObject *cls
                 break;
             }
         }
-        _Py_LeaveRecursiveCallTstate(tstate);
         return r;
     }
 
-    PyObject *checker = _PyObject_LookupSpecial(cls, &_Py_ID(__instancecheck__));
-    if (checker != NULL) {
-        if (_Py_EnterRecursiveCallTstate(tstate, " in __instancecheck__")) {
-            Py_DECREF(checker);
-            return -1;
-        }
-
-        PyObject *res = PyObject_CallOneArg(checker, inst);
-        _Py_LeaveRecursiveCallTstate(tstate);
-        Py_DECREF(checker);
-
-        if (res == NULL) {
-            return -1;
-        }
+    PyObject *res = _PyObject_MaybeCallSpecialOneArg(cls, &_Py_ID(__instancecheck__), inst);
+    if (res != NULL) {
         int ok = PyObject_IsTrue(res);
         Py_DECREF(res);
-
         return ok;
     }
-    else if (_PyErr_Occurred(tstate)) {
+    else if (PyErr_Occurred()) {
         return -1;
     }
 
@@ -2724,8 +2693,6 @@ recursive_issubclass(PyObject *derived, PyObject *cls)
 static int
 object_issubclass(PyThreadState *tstate, PyObject *derived, PyObject *cls)
 {
-    PyObject *checker;
-
     /* We know what type's __subclasscheck__ does. */
     if (PyType_CheckExact(cls)) {
         /* Quick test for an exact match */
@@ -2738,11 +2705,11 @@ object_issubclass(PyThreadState *tstate, PyObject *derived, PyObject *cls)
         cls = _Py_union_args(cls);
     }
 
-    if (PyTuple_Check(cls)) {
+    if (_Py_EnterRecursiveCallTstate(tstate, " in __subclasscheck__")) {
+        return -1;
+    }
 
-        if (_Py_EnterRecursiveCallTstate(tstate, " in __subclasscheck__")) {
-            return -1;
-        }
+    if (PyTuple_Check(cls)) {
         Py_ssize_t n = PyTuple_GET_SIZE(cls);
         int r = 0;
         for (Py_ssize_t i = 0; i < n; ++i) {
@@ -2752,27 +2719,17 @@ object_issubclass(PyThreadState *tstate, PyObject *derived, PyObject *cls)
                 /* either found it, or got an error */
                 break;
         }
-        _Py_LeaveRecursiveCallTstate(tstate);
         return r;
     }
 
-    checker = _PyObject_LookupSpecial(cls, &_Py_ID(__subclasscheck__));
-    if (checker != NULL) {
-        int ok = -1;
-        if (_Py_EnterRecursiveCallTstate(tstate, " in __subclasscheck__")) {
-            Py_DECREF(checker);
-            return ok;
-        }
-        PyObject *res = PyObject_CallOneArg(checker, derived);
-        _Py_LeaveRecursiveCallTstate(tstate);
-        Py_DECREF(checker);
-        if (res != NULL) {
-            ok = PyObject_IsTrue(res);
-            Py_DECREF(res);
-        }
+    PyObject *res = _PyObject_MaybeCallSpecialOneArg(cls, &_Py_ID(__subclasscheck__),
+                                                     derived);
+    if (res != NULL) {
+        int ok = PyObject_IsTrue(res);
+        Py_DECREF(res);
         return ok;
     }
-    else if (_PyErr_Occurred(tstate)) {
+    else if (PyErr_Occurred()) {
         return -1;
     }
 

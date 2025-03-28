@@ -188,6 +188,27 @@ def thread_local_read():
         _ = tmp.x
         _ = tmp.x
 
+class Meta(type):
+    def __instancecheck__(self, instance):
+        return hasattr(instance, 'foo')
+
+class MyClass(metaclass=Meta):
+    pass
+
+class OtherClass:
+    def __init__(self):
+        self.foo = 'bar'
+
+@register_benchmark
+def instance_check():
+    obj = MyClass()
+    other = OtherClass()
+    for i in range(1000 * WORK_SCALE):
+        isinstance(obj, MyClass)
+        isinstance(other, MyClass)
+        isinstance(obj, OtherClass)
+        isinstance(other, OtherClass)
+
 
 def bench_one_thread(func):
     t0 = time.perf_counter_ns()
