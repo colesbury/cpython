@@ -99,6 +99,9 @@ _Py_brc_queue_object(PyObject *ob)
     PyMutex_Unlock(&bucket->mutex);
 }
 
+extern void
+LOG(const char *msg, ...);
+
 static void
 merge_queued_objects(_PyObjectStack *to_merge)
 {
@@ -107,6 +110,7 @@ merge_queued_objects(_PyObjectStack *to_merge)
         // Subtract one when merging because the queue had a reference.
         Py_ssize_t refcount = _Py_ExplicitMergeRefcount(ob, -1);
         if (refcount == 0) {
+            LOG("merge_queued_objects dealloc %p", ob);
             _Py_Dealloc(ob);
         }
     }

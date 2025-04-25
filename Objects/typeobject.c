@@ -1273,7 +1273,7 @@ LOG(const char *msg, ...)
 }
 
 void
-print_log()
+print_log(void)
 {
     int start = log_count > MAX_LOG ? (log_count - MAX_LOG) : 0;
     int end = log_count;
