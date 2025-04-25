@@ -37,7 +37,7 @@ def setup_process() -> None:
         pass
     else:
         # Display the Python traceback on fatal errors (e.g. segfault)
-        faulthandler.enable(all_threads=True, file=stderr_fd)
+        # faulthandler.enable(all_threads=True, file=stderr_fd)
 
         # Display the Python traceback on SIGALRM or SIGUSR1 signal
         signals = []

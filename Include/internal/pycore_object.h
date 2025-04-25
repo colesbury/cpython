@@ -590,20 +590,26 @@ _Py_TryIncRefShared(PyObject *op)
     }
 }
 
+extern __thread int lookup_result;
+
 /* Tries to incref the object op and ensures that *src still points to it. */
 static inline int
 _Py_TryIncrefCompare(PyObject **src, PyObject *op)
 {
     if (_Py_TryIncrefFast(op)) {
+        lookup_result = 3;
         return 1;
     }
     if (!_Py_TryIncRefShared(op)) {
+        lookup_result = 4;
         return 0;
     }
     if (op != _Py_atomic_load_ptr(src)) {
+        lookup_result = 5;
         Py_DECREF(op);
         return 0;
     }
+    lookup_result = 6;
     return 1;
 }
 

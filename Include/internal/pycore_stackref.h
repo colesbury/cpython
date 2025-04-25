@@ -696,10 +696,13 @@ _PyThreadState_PopCStackRef(PyThreadState *tstate, _PyCStackRef *ref)
 
 #ifdef Py_GIL_DISABLED
 
+extern __thread int lookup_result;
+
 static inline int
 _Py_TryIncrefCompareStackRef(PyObject **src, PyObject *op, _PyStackRef *out)
 {
     if (_PyObject_HasDeferredRefcount(op)) {
+        lookup_result = 2;
         *out = (_PyStackRef){ .bits = (uintptr_t)op | Py_TAG_DEFERRED };
         return 1;
     }
@@ -707,14 +710,17 @@ _Py_TryIncrefCompareStackRef(PyObject **src, PyObject *op, _PyStackRef *out)
         *out = PyStackRef_FromPyObjectSteal(op);
         return 1;
     }
+    lookup_result = 10;
     return 0;
 }
 
 static inline int
 _Py_TryXGetStackRef(PyObject **src, _PyStackRef *out)
 {
+    lookup_result = 0;
     PyObject *op = _Py_atomic_load_ptr_relaxed(src);
     if (op == NULL) {
+        lookup_result = 1;
         *out = PyStackRef_NULL;
         return 1;
     }

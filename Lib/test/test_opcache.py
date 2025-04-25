@@ -566,7 +566,7 @@ class TestRacesDoNotCrash(TestBase):
     # Careful with these. Bigger numbers have a higher chance of catching bugs,
     # but you can also burn through a *ton* of type/dict/function versions:
     ITEMS = 1000
-    LOOPS = 4
+    LOOPS = 40
     WRITERS = 2
 
     @requires_jit_disabled
@@ -591,13 +591,18 @@ class TestRacesDoNotCrash(TestBase):
             else:
                 self.assert_specialized(read, opname)
             # Create writers:
+            b = threading.Barrier(self.WRITERS + 1)
+            def call_writer():
+                b.wait()
+                write(items)
             writers = []
             for _ in range(self.WRITERS):
-                writer = threading.Thread(target=write, args=[items])
+                writer = threading.Thread(target=call_writer)
                 writers.append(writer)
             # Run:
             for writer in writers:
                 writer.start()
+            b.wait()
             read(items)  # BOOM!
             for writer in writers:
                 writer.join()
@@ -842,6 +847,15 @@ class TestRacesDoNotCrash(TestBase):
         def read(items):
             for item in items:
                 try:
+                    item.m()
+                    item.m()
+                    item.m()
+                    item.m()
+                    item.m()
+                    item.m()
+                    item.m()
+                    item.m()
+                    item.m()
                     item.m()
                 except AttributeError:
                     pass

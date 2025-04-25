@@ -1251,6 +1251,37 @@ _PyType_GetVersionForCurrentState(PyTypeObject *tp)
     return tp->tp_version_tag;
 }
 
+#define MAX_LOG 1000
+
+__thread int log_count;
+__thread char **log_buffer;
+
+void
+LOG(const char *msg, ...)
+{
+    int log_idx = log_count++ % MAX_LOG;
+    if (log_buffer == NULL) {
+        log_buffer = malloc(MAX_LOG * sizeof(char *));
+        for (int i = 0; i < MAX_LOG; i++) {
+            log_buffer[i] = malloc(256);
+        }
+    }
+    va_list args;
+    va_start(args, msg);
+    vsnprintf(log_buffer[log_idx], 256, msg, args);
+    va_end(args);
+}
+
+void
+print_log()
+{
+    int start = log_count > MAX_LOG ? (log_count - MAX_LOG) : 0;
+    int end = log_count;
+    for (int i = start; i < end; i++) {
+        int idx = i % MAX_LOG;
+        printf("%s\n", log_buffer[idx]);
+    }
+}
 
 
 #define MAX_VERSIONS_PER_CLASS 1000
@@ -1268,6 +1299,7 @@ assign_version_tag(PyInterpreterState *interp, PyTypeObject *type)
      * Return 0 if this cannot be done, 1 if tp_version_tag is set.
     */
     if (type->tp_version_tag != 0) {
+        LOG("assign_version_tag %s type->tp_version_tag was %u [no op]", type->tp_name, type->tp_version_tag);
         return 1;
     }
     if (!_PyType_HasFeature(type, Py_TPFLAGS_READY)) {
@@ -1293,6 +1325,7 @@ assign_version_tag(PyInterpreterState *interp, PyTypeObject *type)
             return 0;
         }
         set_version_unlocked(type, NEXT_GLOBAL_VERSION_TAG++);
+        LOG("assign_version_tag %s tag=%u [immutable]", type->tp_name, type->tp_version_tag);
         assert (type->tp_version_tag <= _Py_MAX_GLOBAL_TYPE_VERSION_TAG);
     }
     else {
@@ -1302,6 +1335,7 @@ assign_version_tag(PyInterpreterState *interp, PyTypeObject *type)
             return 0;
         }
         set_version_unlocked(type, NEXT_VERSION_TAG(interp)++);
+        LOG("assign_version_tag %s tag=%u [heap]", type->tp_name, type->tp_version_tag);
         assert (type->tp_version_tag != 0);
     }
     return 1;
@@ -5752,9 +5786,24 @@ _PyType_LookupRefAndVersion(PyTypeObject *type, PyObject *name, unsigned int *ve
     return PyStackRef_AsPyObjectSteal(out);
 }
 
+__thread int cache_hit = 0;
+__thread int seq_lock_fail = 0;
+__thread int try_x_getref_fail = 0;
+__thread int mro_lookup = 0;
+__thread uint32_t t_entry_version;
+__thread uint32_t t_type_version;
+__thread Py_ssize_t t_ob_ref_shared;
+__thread int lookup_result;
+
 unsigned int
 _PyType_LookupStackRefAndVersion(PyTypeObject *type, PyObject *name, _PyStackRef *out)
 {
+    cache_hit = 0;
+    seq_lock_fail = 0;
+    mro_lookup = 0;
+    try_x_getref_fail = 0;
+    lookup_result = 0;
+
     unsigned int h = MCACHE_HASH_METHOD(type, name);
     struct type_cache *cache = get_type_cache();
     struct type_cache_entry *entry = &cache->hashtable[h];
@@ -5768,15 +5817,27 @@ _PyType_LookupStackRefAndVersion(PyTypeObject *type, PyObject *name, _PyStackRef
             _Py_atomic_load_ptr_relaxed(&entry->name) == name) {
             OBJECT_STAT_INC_COND(type_cache_hits, !is_dunder_name(name));
             OBJECT_STAT_INC_COND(type_cache_dunder_hits, is_dunder_name(name));
+            t_entry_version = entry_version;
+            t_type_version = type_version;
             if (_Py_TryXGetStackRef(&entry->value, out)) {
                 // If the sequence is still valid then we're done
                 if (_PySeqLock_EndRead(&entry->sequence, sequence)) {
+                    cache_hit = 1;
+                    PyObject *op = PyStackRef_AsPyObjectBorrow(*out);
+                    if (op) {
+                        t_ob_ref_shared = _Py_atomic_load_ssize_relaxed(&op->ob_ref_shared);
+                    }
+                    else {
+                        t_ob_ref_shared = -1;
+                    }
                     return entry_version;
                 }
-                PyStackRef_XCLOSE(*out);
+                seq_lock_fail = 1;
+                PyStackRef_CLEAR(*out);
             }
             else {
                 // If we can't incref the object we need to fallback to locking
+                try_x_getref_fail = 1;
                 break;
             }
         }
@@ -5809,6 +5870,7 @@ _PyType_LookupStackRefAndVersion(PyTypeObject *type, PyObject *name, _PyStackRef
     int has_version = 0;
     unsigned int assigned_version = 0;
     BEGIN_TYPE_LOCK();
+    mro_lookup = 1;
     res = find_name_in_mro(type, name, &error);
     if (MCACHE_CACHEABLE_NAME(name)) {
         has_version = assign_version_tag(interp, type);
@@ -6096,7 +6158,12 @@ type_update_dict(PyTypeObject *type, PyDictObject *dict, PyObject *name,
         update_subclasses() recursion in update_slot(), but carefully:
         they each have their own conditions on which to stop
         recursing into subclasses. */
+    unsigned int old_version = type->tp_version_tag;
     type_modified_unlocked(type);
+
+    LOG("type_update_dict type=%p (%s) old_value=%p value=%p version_tag %u -> %u", type, type->tp_name,
+        *old_value, value,
+        old_version, type->tp_version_tag);
 
     if (_PyDict_SetItem_LockHeld(dict, name, value) < 0) {
         PyErr_Format(PyExc_AttributeError,
