@@ -48,12 +48,17 @@ find_thread_state(struct _brc_bucket *bucket, uintptr_t thread_id)
     return NULL;
 }
 
+extern void
+LOG(const char *msg, ...);
+
 // Enqueue an object to be merged by the owning thread. This steals a
 // reference to the object.
 void
 _Py_brc_queue_object(PyObject *ob)
 {
     PyInterpreterState *interp = _PyInterpreterState_GET();
+
+    LOG("brc queue_object %p", ob);
 
     uintptr_t ob_tid = _Py_atomic_load_uintptr(&ob->ob_tid);
     if (ob_tid == 0) {
@@ -98,9 +103,6 @@ _Py_brc_queue_object(PyObject *ob)
 
     PyMutex_Unlock(&bucket->mutex);
 }
-
-extern void
-LOG(const char *msg, ...);
 
 static void
 merge_queued_objects(_PyObjectStack *to_merge)

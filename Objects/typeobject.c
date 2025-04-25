@@ -1325,7 +1325,7 @@ assign_version_tag(PyInterpreterState *interp, PyTypeObject *type)
             return 0;
         }
         set_version_unlocked(type, NEXT_GLOBAL_VERSION_TAG++);
-        LOG("assign_version_tag %s tag=%u [immutable]", type->tp_name, type->tp_version_tag);
+        LOG("assign_version_tag %p (%s) tag=%u [immutable]", type, type->tp_name, type->tp_version_tag);
         assert (type->tp_version_tag <= _Py_MAX_GLOBAL_TYPE_VERSION_TAG);
     }
     else {
@@ -1335,7 +1335,7 @@ assign_version_tag(PyInterpreterState *interp, PyTypeObject *type)
             return 0;
         }
         set_version_unlocked(type, NEXT_VERSION_TAG(interp)++);
-        LOG("assign_version_tag %s tag=%u [heap]", type->tp_name, type->tp_version_tag);
+        LOG("assign_version_tag %p (%s) tag=%u [heap]", type, type->tp_name, type->tp_version_tag);
         assert (type->tp_version_tag != 0);
     }
     return 1;
