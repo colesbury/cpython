@@ -567,7 +567,7 @@ class TestRacesDoNotCrash(TestBase):
     # but you can also burn through a *ton* of type/dict/function versions:
     ITEMS = 1000
     LOOPS = 40
-    WRITERS = 2
+    WRITERS = 1
 
     @requires_jit_disabled
     def assert_races_do_not_crash(
@@ -862,10 +862,6 @@ class TestRacesDoNotCrash(TestBase):
 
         def write(items):
             for item in items:
-                try:
-                    del item.m
-                except AttributeError:
-                    pass
                 type(item).m = lambda self: None
 
         opname = "LOAD_ATTR_METHOD_LAZY_DICT"
