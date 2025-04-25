@@ -6161,8 +6161,12 @@ type_update_dict(PyTypeObject *type, PyDictObject *dict, PyObject *name,
     unsigned int old_version = type->tp_version_tag;
     type_modified_unlocked(type);
 
-    LOG("type_update_dict type=%p (%s) old_value=%p value=%p version_tag %u -> %u", type, type->tp_name,
-        *old_value, value,
+    LOG("type_update_dict type=%p (%s) old_value=%p (ob_tid=%p, ob_ref_local=%u, ob_ref_shared=%zd) value=%p version_tag %u -> %u", type, type->tp_name,
+        *old_value, 
+        (*old_value) ? (*old_value)->ob_tid : NULL,
+        (*old_value) ? (*old_value)->ob_ref_local : 0,
+        (*old_value) ? (*old_value)->ob_ref_shared : 0,
+        value,
         old_version, type->tp_version_tag);
 
     if (_PyDict_SetItem_LockHeld(dict, name, value) < 0) {
