@@ -1928,9 +1928,14 @@ record_deallocation(PyThreadState *tstate)
     }
 }
 
+extern void
+LOG(const char *msg, ...);
+
 static void
 gc_collect_internal(PyInterpreterState *interp, struct collection_state *state, int generation)
 {
+    LOG("gc_collect_internal(%d)", generation);
+
     _PyEval_StopTheWorld(interp);
 
     // update collection and allocation counters
