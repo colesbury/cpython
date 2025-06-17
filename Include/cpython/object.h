@@ -490,16 +490,20 @@ PyAPI_FUNC(void) _PyTrash_thread_destroy_chain(PyThreadState *tstate);
 
 /* Helper function for Py_TRASHCAN_BEGIN */
 PyAPI_FUNC(int) _Py_ReachedRecursionLimitWithMargin(PyThreadState *tstate, int margin_count);
+PyAPI_FUNC(int) random_deposit(PyThreadState *tstate);
+
 
 #define Py_TRASHCAN_BEGIN(op, dealloc) \
 do { \
     PyThreadState *tstate = PyThreadState_Get(); \
-    if (_Py_ReachedRecursionLimitWithMargin(tstate, 2) && Py_TYPE(op)->tp_dealloc == (destructor)dealloc) { \
+    if ((_Py_ReachedRecursionLimitWithMargin(tstate, 2) || random_deposit(tstate)) && Py_TYPE(op)->tp_dealloc == (destructor)dealloc) { \
         _PyTrash_thread_deposit_object(tstate, (PyObject *)op); \
         break; \
-    }
+    } \
+    tstate->traschcan_depth++;
     /* The body of the deallocator is here. */
 #define Py_TRASHCAN_END \
+    tstate->traschcan_depth--;\
     if (tstate->delete_later && !_Py_ReachedRecursionLimitWithMargin(tstate, 4)) { \
         _PyTrash_thread_destroy_chain(tstate); \
     } \

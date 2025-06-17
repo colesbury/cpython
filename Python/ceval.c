@@ -329,6 +329,26 @@ Py_SetRecursionLimit(int new_limit)
     _PyEval_StartTheWorld(interp);
 }
 
+int random_deposit(PyThreadState *tstate)
+{
+    // avoid spurious test failures do to uncollected trash
+    // you can remove this and it still won't segfault, but some tests may
+    // fail.
+    if (tstate->traschcan_depth == 0) {
+        return 0;
+    }
+
+    // splitmix64 from https://prng.di.unimi.it/splitmix64.c
+    uint64_t z = (tstate->prng += 0x9e3779b97f4a7c15);
+    z = (z ^ (z >> 30)) * 0xbf58476d1ce4e5b9;
+    z = (z ^ (z >> 27)) * 0x94d049bb133111eb;
+    uint64_t r = z ^ (z >> 31);
+    if ((r & 0xFF) < 5) { // 5/256 chance = ~2%
+        return 1;
+    }
+    return 0;
+}
+
 int
 _Py_ReachedRecursionLimitWithMargin(PyThreadState *tstate, int margin_count)
 {
