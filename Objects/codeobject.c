@@ -3492,6 +3492,10 @@ get_code_with_unused_tlbc(PyObject *obj, void *data)
         return 1;
     }
     PyCodeObject *co = (PyCodeObject *) obj;
+    if (co->_co_monitoring != NULL) {
+        // Include code objects with monitoring data
+        return 1;
+    }
     _PyCodeArray *tlbc = co->co_tlbc;
     // The first index always points at the main copy of the bytecode embedded
     // in the code object.
@@ -3507,6 +3511,9 @@ get_code_with_unused_tlbc(PyObject *obj, void *data)
     return 1;
 }
 
+extern int
+_PyDeInstrument_WorldStopped(PyCodeObject *code, PyInterpreterState *interp);
+
 static void
 free_unused_bytecode(PyCodeObject *co, struct flag_set *indices_in_use)
 {
@@ -3519,6 +3526,8 @@ free_unused_bytecode(PyCodeObject *co, struct flag_set *indices_in_use)
             tlbc->entries[i] = NULL;
         }
     }
+
+    _PyDeInstrument_WorldStopped(co, _PyInterpreterState_GET());
 }
 
 int

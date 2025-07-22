@@ -207,7 +207,7 @@ def runtest_refleak(test_name, test_func,
     failed = False
     for deltas, item_name, checker in [
         (rc_deltas, 'references', check_rc_deltas),
-        (alloc_deltas, 'memory blocks', check_rc_deltas),
+        (alloc_deltas, 'memory blocks', any),
         (fd_deltas, 'file descriptors', check_fd_deltas)
     ]:
         # ignore warmup runs

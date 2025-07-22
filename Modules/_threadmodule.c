@@ -703,7 +703,7 @@ static PyObject *
 PyThreadHandleObject_is_done(PyObject *op, PyObject *Py_UNUSED(dummy))
 {
     PyThreadHandleObject *self = PyThreadHandleObject_CAST(op);
-    if (_PyEvent_IsSet(&self->handle->thread_is_exiting)) {
+    if (get_thread_handle_state(self->handle) == THREAD_HANDLE_DONE) {
         Py_RETURN_TRUE;
     }
     else {

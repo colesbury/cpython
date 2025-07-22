@@ -1080,6 +1080,8 @@ debug_check_sanity(PyInterpreterState *interp, PyCodeObject *code)
 {
     int res;
     LOCK_CODE(code);
+    assert(is_version_up_to_date(code, interp));
+    assert(instrumentation_cross_checks(interp, code));
     res = is_version_up_to_date(code, interp) &&
           instrumentation_cross_checks(interp, code);
     UNLOCK_CODE();
@@ -1959,6 +1961,23 @@ instrument_all_executing_code_objects(PyInterpreterState *interp) {
     }
     return 0;
 }
+
+// Deinstrument the code object if monitoring is disabled on both the code
+// object and the interpreter state.
+int
+_PyDeInstrument_WorldStopped(PyCodeObject *code, PyInterpreterState *interp)
+{
+    ASSERT_WORLD_STOPPED();
+    if (code->_co_monitoring == NULL) {
+        return 0;
+    }
+    _Py_LocalMonitors local_monitors = code->_co_monitoring->local_monitors;
+    if (!monitors_are_empty(local_union(interp->monitors, local_monitors))) {
+        return 0;
+    }
+    return instrument_lock_held(code, interp);
+}
+
 
 static void
 set_events(_Py_GlobalMonitors *m, int tool_id, _PyMonitoringEventSet events)
