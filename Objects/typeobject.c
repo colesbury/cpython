@@ -6546,6 +6546,10 @@ type_setattro(PyObject *self, PyObject *name, PyObject *value)
         }
     }
 
+    if (value && PyFunction_Check(value)) {
+        PyUnstable_Object_EnableDeferredRefcount(value);
+    }
+
     BEGIN_TYPE_DICT_LOCK(dict);
     res = type_update_dict(type, (PyDictObject *)dict, name, value, &old_value);
     assert(_PyType_CheckConsistency(type));

@@ -21,12 +21,15 @@
 # > echo "0" | sudo tee /sys/devices/system/cpu/cpufreq/boost
 #
 
+import enum
 import math
 import os
 import queue
 import sys
 import threading
+import typing
 import time
+from dataclasses import dataclass
 from operator import methodcaller
 
 # The iterations in individual benchmarks are scaled by this factor.
@@ -201,6 +204,37 @@ def method_caller():
     obj = MyClass()
     for i in range(1000 * WORK_SCALE):
         mc(obj)
+
+@dataclass
+class MyDataClass:
+    x: int
+    y: int
+    z: int
+
+@register_benchmark
+def instantiate_dataclass():
+    for _ in range(1000 * WORK_SCALE):
+        obj = MyDataClass(x=1, y=2, z=3)
+
+class MyNamedTuple(typing.NamedTuple):
+    x: int
+    y: int
+    z: int
+
+@register_benchmark
+def instantiate_namedtuple():
+    for _ in range(1000 * WORK_SCALE):
+        obj = MyNamedTuple(x=1, y=2, z=3)
+
+class MyEnum(enum.Enum):
+    X = 1
+    Y = 2
+
+@register_benchmark
+def access_enum():
+    for _ in range(1000 * WORK_SCALE):
+        # MyEnum.X
+        MyEnum.Y.value
 
 def bench_one_thread(func):
     t0 = time.perf_counter_ns()
