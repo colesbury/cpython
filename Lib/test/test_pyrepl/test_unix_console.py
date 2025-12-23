@@ -371,6 +371,7 @@ class TestUnixConsoleEIOHandling(TestCase):
         console.restore()
 
     @unittest.skipUnless(sys.platform == "linux", "Only valid on Linux")
+    @support.skip_if_sanitizer("flaky in Tsan", thread=True)
     def test_repl_eio(self):
         # Use the pty-based approach to simulate EIO error
         script_path = os.path.join(os.path.dirname(__file__), "eio_test_script.py")
