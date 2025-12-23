@@ -11,6 +11,26 @@ on:
         required: false
         type: boolean
         default: false
+      test-command:
+        description: Override the test command when non-empty
+        required: false
+        type: string
+        default: ''
+  workflow_dispatch:
+    inputs:
+      sanitizer:
+        required: true
+        type: string
+      free-threading:
+        description: Whether to use free-threaded mode
+        required: false
+        type: boolean
+        default: false
+      test-command:
+        description: Override the test command when non-empty
+        required: false
+        type: string
+        default: ''
 
 env:
   FORCE_COLOR: 1
@@ -24,7 +44,7 @@ jobs:
         || ''
       }}
     runs-on: ubuntu-24.04
-    timeout-minutes: 60
+    timeout-minutes: 120
     steps:
     - uses: actions/checkout@v4
       with:
@@ -39,11 +59,11 @@ jobs:
         chmod +x llvm.sh
 
         if [ "${SANITIZER}" = "TSan" ]; then
-          sudo ./llvm.sh 17  # gh-121946: llvm-18 package is temporarily broken
-          sudo update-alternatives --install /usr/bin/clang clang /usr/bin/clang-17 100
-          sudo update-alternatives --set clang /usr/bin/clang-17
-          sudo update-alternatives --install /usr/bin/clang++ clang++ /usr/bin/clang++-17 100
-          sudo update-alternatives --set clang++ /usr/bin/clang++-17
+          sudo ./llvm.sh 20
+          sudo update-alternatives --install /usr/bin/clang clang /usr/bin/clang-20 100
+          sudo update-alternatives --set clang /usr/bin/clang-20
+          sudo update-alternatives --install /usr/bin/clang++ clang++ /usr/bin/clang++-20 100
+          sudo update-alternatives --set clang++ /usr/bin/clang++-20
           # Reduce ASLR to avoid TSan crashing
           sudo sysctl -w vm.mmap_rnd_bits=28
         else
@@ -82,13 +102,21 @@ jobs:
         ${{ fromJSON(inputs.free-threading) && '--disable-gil' || '' }}
     - name: Build CPython
       run: make -j4
+    - name: Print stack limit
+      run: ulimit -s
     - name: Display build info
       run: make pythoninfo
     - name: Tests
-      run: >-
-        ./python -m test
-        ${{ inputs.sanitizer == 'TSan' && '--tsan' || '' }}
-        -j4
+      run: |
+        if [ -n "${TEST_COMMAND}" ]; then
+          ${TEST_COMMAND}
+        else
+          ./python -m test \
+            ${{ inputs.sanitizer == 'TSan' && '--tsan' || '' }} \
+            -j4
+        fi
+      env:
+        TEST_COMMAND: ${{ inputs.test-command }}
     - name: Parallel tests
       if: >-
         inputs.sanitizer == 'TSan'

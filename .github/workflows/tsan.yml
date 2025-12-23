@@ -1,0 +1,29 @@
+name: TSan
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  FORCE_COLOR: 1
+
+jobs:
+  tsan:
+    name: >-
+      Thread sanitizer${{
+        fromJSON(matrix.free-threading)
+        && ' (free-threading)'
+        || ''
+      }}
+    strategy:
+      fail-fast: false
+      matrix:
+        free-threading:
+        - false
+        - true
+    uses: ./.github/workflows/reusable-san.yml
+    with:
+      sanitizer: TSan
+      free-threading: ${{ matrix.free-threading }}

@@ -558,6 +558,7 @@ class ClassTests(unittest.TestCase):
 
     @support.skip_emscripten_stack_overflow()
     @support.skip_wasi_stack_overflow()
+    @support.skip_if_sanitizer("requires deep stack", thread=True)
     def testSFBug532646(self):
         # Test for SF bug 532646
 

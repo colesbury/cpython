@@ -31,6 +31,12 @@ TSAN_TESTS = [
     'test_free_threading',
 ]
 
+TSAN_EXCLUDE_TESTS = [
+    'test_multiprocessing_fork',
+    'test_multiprocessing_forkserver',
+    'test_multiprocessing_spawn',
+]
+
 # Tests that should be run with `--parallel-threads=N` under TSAN. These tests
 # typically do not use threads, but are run multiple times in parallel by
 # the regression test runner with the `--parallel-threads` option enabled.
@@ -40,9 +46,8 @@ TSAN_PARALLEL_TESTS = [
 ]
 
 
-def setup_tsan_tests(cmdline_args) -> None:
-    if not cmdline_args:
-        cmdline_args[:] = TSAN_TESTS[:]
+def setup_tsan_tests(exclude_tests) -> None:
+    exclude_tests.update(set(TSAN_EXCLUDE_TESTS))
 
 def setup_tsan_parallel_tests(cmdline_args) -> None:
     if not cmdline_args:

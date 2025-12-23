@@ -3749,6 +3749,7 @@ class ClassPropertiesAndMethods(unittest.TestCase):
 
     @support.skip_wasi_stack_overflow()
     @support.skip_emscripten_stack_overflow()
+    @support.skip_if_sanitizer("requires deep stack", thread=True)
     def test_recursive_call(self):
         # Testing recursive __call__() by setting to instance of class...
         class A(object):
@@ -4030,6 +4031,7 @@ class ClassPropertiesAndMethods(unittest.TestCase):
 
     @support.skip_emscripten_stack_overflow()
     @support.skip_wasi_stack_overflow()
+    @support.skip_if_sanitizer("requires deep stack", thread=True)
     def test_slots_trash(self):
         # Testing slot trash...
         # Deallocating deeply nested slotted trash caused stack overflows

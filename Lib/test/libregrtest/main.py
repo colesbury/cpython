@@ -201,7 +201,7 @@ class Regrtest:
             setup_pgo_tests(self.cmdline_args, self.pgo_extended)
 
         if self.tsan:
-            setup_tsan_tests(self.cmdline_args)
+            setup_tsan_tests(exclude_tests)
 
         if self.tsan_parallel:
             setup_tsan_parallel_tests(self.cmdline_args)

@@ -527,13 +527,16 @@ tstate_set_stack(PyThreadState *tstate,
     assert((top - base) >= _PyOS_MIN_STACK_SIZE);
 
 #ifdef _Py_THREAD_SANITIZER
-    // Thread sanitizer crashes if we use more than half the stack.
+    // Thread sanitizer crashes if we use a large stack, probably due
+    // to capturing backtraces.
     uintptr_t stacksize = top - base;
+    if (stacksize > _PyOS_MAX_STACK_SIZE) {
 #  if _Py_STACK_GROWS_DOWN
-    base += stacksize/2;
+    base = top - _PyOS_MAX_STACK_SIZE;
 #  else
-    top -= stacksize/2;
-#  endif
+    top = base + _PyOS_MAX_STACK_SIZE;
+#endif
+    }
 #endif
     _PyThreadStateImpl *_tstate = (_PyThreadStateImpl *)tstate;
 #if _Py_STACK_GROWS_DOWN
@@ -618,6 +621,7 @@ _Py_CheckRecursiveCall(PyThreadState *tstate, const char *where)
     assert(_tstate->c_stack_soft_limit != 0);
     assert(_tstate->c_stack_hard_limit != 0);
 #if _Py_STACK_GROWS_DOWN
+    printf("Overflow by %zu bytes\n", _tstate->c_stack_soft_limit - here_addr);
     assert(here_addr >= _tstate->c_stack_hard_limit - _PyOS_STACK_MARGIN_BYTES);
     if (here_addr < _tstate->c_stack_hard_limit) {
         /* Overflowing while handling an overflow. Give up. */

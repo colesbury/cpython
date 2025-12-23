@@ -1,0 +1,20 @@
+name: TSan Single Test
+
+on:
+  workflow_dispatch:
+    inputs:
+      test-command:
+        description: Test command to run
+        required: true
+        default: './python -m test --tsan -j4 test_dict -m test_repr_deep'
+
+permissions:
+  contents: read
+
+jobs:
+  tsan-single-test:
+    name: Thread sanitizer (single test)
+    uses: ./.github/workflows/reusable-san.yml
+    with:
+      sanitizer: TSan
+      test-command: ${{ inputs.test-command }}

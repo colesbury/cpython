@@ -62,6 +62,7 @@ extern PyObject * _Py_CompileStringObjectWithModule(
 
 #ifdef _Py_THREAD_SANITIZER
 #  define _PyOS_MIN_STACK_SIZE (_PyOS_STACK_MARGIN_BYTES * 6)
+#  define _PyOS_MAX_STACK_SIZE (4 * 1024 * 1024)
 #else
 #  define _PyOS_MIN_STACK_SIZE (_PyOS_STACK_MARGIN_BYTES * 3)
 #endif
