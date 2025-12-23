@@ -804,6 +804,7 @@ class StructTest(ComplexesAreIdenticalMixin, unittest.TestCase):
         support.is_android or support.is_apple_mobile,
         "Subinterpreters are not supported on Android and iOS"
     )
+    @support.skip_if_sanitizer("gh-129824: data races in InterpreterPoolExecutor", thread=True)
     def test_endian_table_init_subinterpreters(self):
         # Verify that the _struct extension module can be initialized
         # concurrently in subinterpreters (gh-140260).

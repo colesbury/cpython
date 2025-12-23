@@ -7444,6 +7444,7 @@ class ExtensionModuleTests(unittest.TestCase):
             """)
         script_helper.assert_python_ok('-c', script)
 
+    @support.skip_if_sanitizer("gh-129824: data races in InterpreterPoolExecutor", thread=True)
     def test_concurrent_initialization_subinterpreter(self):
         # gh-136421: Concurrent initialization of _datetime across multiple
         # interpreters wasn't thread-safe due to its static types.
