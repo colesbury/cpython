@@ -1,6 +1,7 @@
 import collections
 import types
 import unittest
+from test import support
 from test.support import skip_emscripten_stack_overflow, skip_wasi_stack_overflow, exceeds_recursion_limit
 
 class TestExceptionGroupTypeHierarchy(unittest.TestCase):
@@ -537,6 +538,7 @@ class DeepRecursionInSplitAndSubgroup(unittest.TestCase):
 
     @skip_emscripten_stack_overflow()
     @skip_wasi_stack_overflow()
+    @support.skip_if_sanitizer("requires deep stack", thread=True)
     def test_deep_split(self):
         e = self.make_deep_eg()
         with self.assertRaises(RecursionError):
@@ -544,6 +546,7 @@ class DeepRecursionInSplitAndSubgroup(unittest.TestCase):
 
     @skip_emscripten_stack_overflow()
     @skip_wasi_stack_overflow()
+    @support.skip_if_sanitizer("requires deep stack", thread=True)
     def test_deep_subgroup(self):
         e = self.make_deep_eg()
         with self.assertRaises(RecursionError):

@@ -884,6 +884,7 @@ class BasicSocketTests(unittest.TestCase):
         #   99991231235959Z (rfc 5280)
         self.cert_time_ok("Dec 31 23:59:59 9999 GMT", 253402300799.0)
 
+    @support.thread_unsafe
     @support.run_with_locale('LC_ALL', '')
     def test_cert_time_to_seconds_locale(self):
         # `cert_time_to_seconds()` should be locale independent

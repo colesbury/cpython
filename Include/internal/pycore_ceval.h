@@ -218,9 +218,16 @@ static inline int _Py_MakeRecCheck(PyThreadState *tstate)  {
     // If it is below the hardware stack base, assume that we have the wrong stack limits, and do nothing.
     // We could have the wrong stack limits because of limited platform support, or user-space threads.
 #if _Py_STACK_GROWS_DOWN
-    return here_addr < _tstate->c_stack_soft_limit && here_addr >= _tstate->c_stack_soft_limit - 2 * _PyOS_STACK_MARGIN_BYTES;
+    if (here_addr < _tstate->c_stack_soft_limit) {
+        if (here_addr < _tstate->c_stack_soft_limit - 2 * _PyOS_STACK_MARGIN_BYTES) {
+            fprintf(stderr, "Bad overflow by %zu bytes\n", _tstate->c_stack_soft_limit - here_addr);
+            abort();
+        }
+        return 1;
+    }
+    return 0;
 #else
-    return here_addr > _tstate->c_stack_soft_limit && here_addr <= _tstate->c_stack_soft_limit + 2 * _PyOS_STACK_MARGIN_BYTES;
+    return here_addr > _tstate->c_stack_soft_limit; && here_addr <= _tstate->c_stack_soft_limit + 2 * _PyOS_STACK_MARGIN_BYTES;
 #endif
 }
 

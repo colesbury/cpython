@@ -1231,6 +1231,7 @@ class ArgsTestCase(BaseTestCase):
                  r'(?: *[0-9]+ *[0-9]{1,2}\.[0-9]% *[^ ]+ +\([^)]+\)+)+')
         self.check_line(output, regex)
 
+    # TODO(sgross): flaky in TSan
     def test_wait(self):
         # test --wait
         test = self.create_test('wait')
