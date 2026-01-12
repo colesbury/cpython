@@ -11,6 +11,26 @@ on:
         required: false
         type: boolean
         default: false
+      test-command:
+        description: Override the test command when non-empty
+        required: false
+        type: string
+        default: ''
+  workflow_dispatch:
+    inputs:
+      sanitizer:
+        required: true
+        type: string
+      free-threading:
+        description: Whether to use free-threaded mode
+        required: false
+        type: boolean
+        default: false
+      test-command:
+        description: Override the test command when non-empty
+        required: false
+        type: string
+        default: ''
 
 env:
   FORCE_COLOR: 1
