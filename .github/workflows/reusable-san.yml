@@ -96,6 +96,10 @@ jobs:
       env:
         SANITIZER: ${{ inputs.sanitizer }}
         SAN_LOG_OPTION: log_path=${{ github.workspace }}/san_log
+    - name: Print clang versions
+      run: |
+        clang --version
+        clang++ --version
     - name: Add ccache to PATH
       run: |
         echo "PATH=/usr/lib/ccache:$PATH" >> "$GITHUB_ENV"
