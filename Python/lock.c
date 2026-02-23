@@ -22,14 +22,59 @@
 // starvation.
 static const PyTime_t TIME_TO_BE_FAIR_NS = 1000*1000;
 
-// Spin for a bit before parking the thread. This is only enabled for
-// `--disable-gil` builds because it is unlikely to be helpful if the GIL is
-// enabled.
+// Maximum number of spin iterations before parking. Disabled when the GIL
+// is enabled because contention on internal locks is unlikely.
 #if Py_GIL_DISABLED
-static const int MAX_SPIN_COUNT = 40;
+static int _max_spin_count = 40;
 #else
-static const int MAX_SPIN_COUNT = 0;
+static int _max_spin_count = 0;
 #endif
+
+// Use pause instruction instead of sched_yield() for spinning.
+static int _use_pause = 0;
+
+// Number of pause/yield operations per spin iteration. The count doubles
+// each iteration (exponential backoff) up to _max_pause_count.
+static int _initial_pause_count = 1;
+static int _max_pause_count = -1;
+
+// Load spin loop configuration from environment variables (called once).
+static _PyOnceFlag _spin_config_once;
+
+static int
+_init_spin_config(void *arg)
+{
+    const char *env;
+
+    env = getenv("PYTHON_MUTEX_SPIN_COUNT");
+    if (env) {
+        _max_spin_count = (int)strtol(env, NULL, 10);
+    }
+    else {
+        _max_spin_count = -1;
+    }
+
+    env = getenv("PYTHON_MUTEX_USE_PAUSE");
+    if (env) {
+        _use_pause = (int)strtol(env, NULL, 10);
+    }
+
+    env = getenv("PYTHON_MUTEX_INITIAL_PAUSE_COUNT");
+    if (env) {
+        _initial_pause_count = (int)strtol(env, NULL, 10);
+    }
+
+    env = getenv("PYTHON_MUTEX_MAX_PAUSE_COUNT");
+    if (env) {
+        _max_pause_count = (int)strtol(env, NULL, 10);
+    }
+
+    if (_max_pause_count == -1 && _max_spin_count == -1) {
+        _max_spin_count = 40;
+    }
+
+    return 0;
+}
 
 // Per-thread spin statistics, accumulated across lock acquisitions.
 static _Py_thread_local int64_t _PyMutex_SpinTimeNs = 0;
@@ -75,6 +120,21 @@ _Py_yield(void)
 #endif
 }
 
+static inline void
+_Py_pause(void)
+{
+#if defined(__x86_64__) || defined(__i386__)
+    __asm__ __volatile__("pause");
+#elif defined(__aarch64__)
+    __asm__ __volatile__("yield");
+#elif defined(MS_WINDOWS)
+    YieldProcessor();
+#else
+    // fall back to sched_yield if no pause instruction available
+    _Py_yield();
+#endif
+}
+
 PyLockStatus
 _PyMutex_LockTimed(PyMutex *m, PyTime_t timeout, _PyLockFlags flags)
 {
@@ -90,6 +150,9 @@ _PyMutex_LockTimed(PyMutex *m, PyTime_t timeout, _PyLockFlags flags)
 
     FT_STAT_MUTEX_SLEEP_INC();
 
+    // Load spin loop configuration from environment variables (once).
+    _PyOnceFlag_CallOnce(&_spin_config_once, _init_spin_config, NULL);
+
     PyTime_t now;
     // silently ignore error: cannot report error to the caller
     (void)PyTime_MonotonicRaw(&now);
@@ -98,57 +161,66 @@ _PyMutex_LockTimed(PyMutex *m, PyTime_t timeout, _PyLockFlags flags)
         endtime = _PyTime_Add(now, timeout);
     }
 
+    // Spin for a bit before parking the thread. We stop spinning when:
+    // - the lock is acquired
+    // - _Py_HAS_PARKED is set (another thread is already waiting)
+    // - we've exceeded _max_spin_count iterations
+    int spin_count = 0;
+    int cur_pause_count = _initial_pause_count;
+    while (!(v & _Py_HAS_PARKED)
+            && (_max_spin_count < 0 || spin_count < _max_spin_count)) {
+        // Pause or yield
+        PyTime_t t0, t1;
+        (void)PyTime_MonotonicRaw(&t0);
+        if (_use_pause) {
+            for (int i = 0; i < cur_pause_count; i++) {
+                _Py_pause();
+            }
+        }
+        else {
+            for (int i = 0; i < cur_pause_count; i++) {
+                _Py_yield();
+            }
+        }
+        (void)PyTime_MonotonicRaw(&t1);
+        _PyMutex_SpinTimeNs += t1 - t0;
+        _PyMutex_SpinCount++;
+        spin_count++;
+
+        v = _Py_atomic_load_uint8_relaxed(&m->_bits);
+        if ((v & _Py_LOCKED) == 0) {
+            if (_Py_atomic_compare_exchange_uint8(&m->_bits, &v, v|_Py_LOCKED)) {
+                return PY_LOCK_ACQUIRED;
+            }
+        }
+
+        // Exponential backoff: double the pause count up to the max
+        if (_max_pause_count >= 0) {
+            cur_pause_count *= 2;
+            if (cur_pause_count > _max_pause_count) {
+                break;
+            }
+        }
+    }
+
+    // Slow path: park the thread
     struct mutex_entry entry = {
         .time_to_be_fair = now + TIME_TO_BE_FAIR_NS,
         .handed_off = 0,
     };
 
-    Py_ssize_t spin_count = 0;
-    int has_parked = 0;
     for (;;) {
         if ((v & _Py_LOCKED) == 0) {
-            // The lock is unlocked. Try to grab it.
             if (_Py_atomic_compare_exchange_uint8(&m->_bits, &v, v|_Py_LOCKED)) {
-                if (!has_parked && spin_count > 0) {
-                    PyTime_t spin_end;
-                    (void)PyTime_MonotonicRaw(&spin_end);
-                    _PyMutex_SpinTimeNs += spin_end - now;
-                    _PyMutex_SpinCount += spin_count;
-                }
                 return PY_LOCK_ACQUIRED;
             }
             continue;
         }
 
-        if (!(v & _Py_HAS_PARKED) && spin_count < MAX_SPIN_COUNT) {
-            // Spin for a bit.
-            _Py_yield();
-            spin_count++;
-            continue;
-        }
-
-        if (timeout == 0) {
-            return PY_LOCK_FAILURE;
-        }
         if ((flags & _PY_LOCK_PYTHONLOCK) && Py_IsFinalizing()) {
-            // At this phase of runtime shutdown, only the finalization thread
-            // can have attached thread state; others hang if they try
-            // attaching. And since operations on this lock requires attached
-            // thread state (_PY_LOCK_PYTHONLOCK), the finalization thread is
-            // running this code, and no other thread can unlock.
-            // Raise rather than hang. (_PY_LOCK_PYTHONLOCK allows raising
-            // exceptons.)
             PyErr_SetString(PyExc_PythonFinalizationError,
                             "cannot acquire lock at interpreter finalization");
             return PY_LOCK_FAILURE;
-        }
-
-        if (!has_parked) {
-            PyTime_t spin_end;
-            (void)PyTime_MonotonicRaw(&spin_end);
-            _PyMutex_SpinTimeNs += spin_end - now;
-            _PyMutex_SpinCount += spin_count;
-            has_parked = 1;
         }
 
         uint8_t newv = v;
@@ -166,9 +238,6 @@ _PyMutex_LockTimed(PyMutex *m, PyTime_t timeout, _PyLockFlags flags)
         if (ret == Py_PARK_OK) {
             if (entry.handed_off) {
                 _PyMutex_HandoffCount++;
-                // We own the lock now. thread.Lock allows other threads
-                // to concurrently release the lock so we cannot assert that
-                // it is locked if _PY_LOCK_PYTHONLOCK is set.
                 assert(_Py_atomic_load_uint8_relaxed(&m->_bits) & _Py_LOCKED ||
                        (flags & _PY_LOCK_PYTHONLOCK) != 0);
                 return PY_LOCK_ACQUIRED;
@@ -190,7 +259,6 @@ _PyMutex_LockTimed(PyMutex *m, PyTime_t timeout, _PyLockFlags flags)
         if (timeout > 0) {
             timeout = _PyDeadline_Get(endtime);
             if (timeout <= 0) {
-                // Avoid negative values because those mean block forever.
                 timeout = 0;
             }
         }
