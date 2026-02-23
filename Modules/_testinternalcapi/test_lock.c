@@ -196,14 +196,38 @@ test_lock_counter_slow(PyObject *self, PyObject *obj)
 
 struct bench_data_locks {
     int stop;
-    int use_pymutex;
-    int critical_section_length;
+    int work_inside;
+    int work_outside;
+    int num_acquisitions;
+    Py_ssize_t target_iters;
     char padding[200];
-    PyThread_type_lock lock;
     PyMutex m;
     double value;
-    Py_ssize_t total_iters;
 };
+
+struct bg_thread_data {
+    int *stop;
+    Py_ssize_t bg_work;
+    Py_ssize_t iters;
+    PyEvent done;
+};
+
+static void
+thread_background_work(void *arg)
+{
+    struct bg_thread_data *data = arg;
+    Py_ssize_t bg_work = data->bg_work;
+    double my_value = 1.0;
+    Py_ssize_t iters = 0;
+    while (!_Py_atomic_load_int_relaxed(data->stop)) {
+        for (Py_ssize_t i = 0; i < bg_work; i++) {
+            my_value = my_value + 1.0;
+        }
+        iters++;
+    }
+    data->iters = iters;
+    _PyEvent_Notify(&data->done);
+}
 
 struct bench_thread_data {
     struct bench_data_locks *bench_data;
@@ -216,33 +240,41 @@ thread_benchmark_locks(void *arg)
 {
     struct bench_thread_data *thread_data = arg;
     struct bench_data_locks *bench_data = thread_data->bench_data;
-    int use_pymutex = bench_data->use_pymutex;
-    int critical_section_length = bench_data->critical_section_length;
+    int work_inside = bench_data->work_inside;
+    int work_outside = bench_data->work_outside;
+    int num_acquisitions = bench_data->num_acquisitions;
+    Py_ssize_t target_iters = bench_data->target_iters;
 
     double my_value = 1.0;
     Py_ssize_t iters = 0;
-    while (!_Py_atomic_load_int_relaxed(&bench_data->stop)) {
-        if (use_pymutex) {
+    for (;;) {
+        if (target_iters > 0) {
+            // Fixed iteration mode: each thread runs for target_iters
+            if (iters >= target_iters) {
+                break;
+            }
+        }
+        else {
+            // Time-based mode: stop when signaled
+            if (_Py_atomic_load_int_relaxed(&bench_data->stop)) {
+                break;
+            }
+        }
+        for (int acq = 0; acq < num_acquisitions; acq++) {
             PyMutex_Lock(&bench_data->m);
-            for (int i = 0; i < critical_section_length; i++) {
+            for (int i = 0; i < work_inside; i++) {
                 bench_data->value += my_value;
                 my_value = bench_data->value;
             }
             PyMutex_Unlock(&bench_data->m);
         }
-        else {
-            PyThread_acquire_lock(bench_data->lock, 1);
-            for (int i = 0; i < critical_section_length; i++) {
-                bench_data->value += my_value;
-                my_value = bench_data->value;
-            }
-            PyThread_release_lock(bench_data->lock);
+        for (int i = 0; i < work_outside; i++) {
+            my_value = my_value + 1.0;
         }
-        iters++;
+        iters += num_acquisitions;
     }
 
     thread_data->iters = iters;
-    _Py_atomic_add_ssize(&bench_data->total_iters, iters);
     _PyEvent_Notify(&thread_data->done);
 }
 
@@ -250,9 +282,14 @@ thread_benchmark_locks(void *arg)
 _testinternalcapi.benchmark_locks
 
     num_threads: Py_ssize_t
-    use_pymutex: bool = True
-    critical_section_length: int = 1
+    work_inside: int = 1
+    work_outside: int = 0
     time_ms: int = 1000
+    num_acquisitions: int = 1
+    total_iters: Py_ssize_t = 0
+    num_bg_threads: Py_ssize_t = 0
+    bg_work: Py_ssize_t = 1000
+    num_locks: Py_ssize_t = 1
     /
 
 [clinic start generated code]*/
@@ -260,10 +297,13 @@ _testinternalcapi.benchmark_locks
 static PyObject *
 _testinternalcapi_benchmark_locks_impl(PyObject *module,
                                        Py_ssize_t num_threads,
-                                       int use_pymutex,
-                                       int critical_section_length,
-                                       int time_ms)
-/*[clinic end generated code: output=381df8d7e9a74f18 input=f3aeaf688738c121]*/
+                                       int work_inside, int work_outside,
+                                       int time_ms, int num_acquisitions,
+                                       Py_ssize_t total_iters,
+                                       Py_ssize_t num_bg_threads,
+                                       Py_ssize_t bg_work,
+                                       Py_ssize_t num_locks)
+/*[clinic end generated code: output=5b60b2e01fb2992c input=6bd951077df0e27e]*/
 {
     // Run from Tools/lockbench/lockbench.py
     // Based on the WebKit lock benchmarks:
@@ -271,22 +311,34 @@ _testinternalcapi_benchmark_locks_impl(PyObject *module,
     // See also https://webkit.org/blog/6161/locking-in-webkit/
     PyObject *thread_iters = NULL;
     PyObject *res = NULL;
+    int bg_stop = 0;
+    struct bench_data_locks *bench_data = NULL;
+    struct bg_thread_data *bg_data = NULL;
+    struct bench_thread_data *thread_data = NULL;
 
-    struct bench_data_locks bench_data;
-    memset(&bench_data, 0, sizeof(bench_data));
-    bench_data.use_pymutex = use_pymutex;
-    bench_data.critical_section_length = critical_section_length;
-
-    bench_data.lock = PyThread_allocate_lock();
-    if (bench_data.lock == NULL) {
-        return PyErr_NoMemory();
+    bench_data = PyMem_Calloc(num_locks, sizeof(*bench_data));
+    if (bench_data == NULL) {
+        PyErr_NoMemory();
+        goto exit;
+    }
+    for (Py_ssize_t i = 0; i < num_locks; i++) {
+        bench_data[i].work_inside = work_inside;
+        bench_data[i].work_outside = work_outside;
+        bench_data[i].num_acquisitions = num_acquisitions;
+        bench_data[i].target_iters = total_iters;
     }
 
-    struct bench_thread_data *thread_data = NULL;
     thread_data = PyMem_Calloc(num_threads, sizeof(*thread_data));
     if (thread_data == NULL) {
         PyErr_NoMemory();
         goto exit;
+    }
+    if (num_bg_threads > 0) {
+        bg_data = PyMem_Calloc(num_bg_threads, sizeof(*bg_data));
+        if (bg_data == NULL) {
+            PyErr_NoMemory();
+            goto exit;
+        }
     }
 
     thread_iters = PyList_New(num_threads);
@@ -299,42 +351,62 @@ _testinternalcapi_benchmark_locks_impl(PyObject *module,
         goto exit;
     }
 
+    for (Py_ssize_t i = 0; i < num_bg_threads; i++) {
+        bg_data[i].stop = &bg_stop;
+        bg_data[i].bg_work = bg_work;
+        PyThread_start_new_thread(thread_background_work, &bg_data[i]);
+    }
+
     for (Py_ssize_t i = 0; i < num_threads; i++) {
-        thread_data[i].bench_data = &bench_data;
+        thread_data[i].bench_data = &bench_data[i % num_locks];
         PyThread_start_new_thread(thread_benchmark_locks, &thread_data[i]);
     }
 
-    // Let the threads run for `time_ms` milliseconds
-    pysleep(time_ms);
-    _Py_atomic_store_int(&bench_data.stop, 1);
+    if (total_iters == 0) {
+        // Time-based mode: let the threads run for `time_ms` milliseconds
+        pysleep(time_ms);
+        for (Py_ssize_t i = 0; i < num_locks; i++) {
+            _Py_atomic_store_int(&bench_data[i].stop, 1);
+        }
+    }
 
-    // Wait for the threads to finish
+    // Wait for lock threads to finish
     for (Py_ssize_t i = 0; i < num_threads; i++) {
         PyEvent_Wait(&thread_data[i].done);
     }
 
-    Py_ssize_t total_iters = bench_data.total_iters;
     if (PyTime_PerfCounter(&end) < 0) {
         goto exit;
     }
 
-    // Return the total number of acquisitions and the number of acquisitions
-    // for each thread.
+    // Stop background threads
+    _Py_atomic_store_int(&bg_stop, 1);
+    for (Py_ssize_t i = 0; i < num_bg_threads; i++) {
+        PyEvent_Wait(&bg_data[i].done);
+    }
+
+    // Return the total number of acquisitions, the number of acquisitions
+    // for each thread, and elapsed time.
+    Py_ssize_t sum_iters = 0;
     for (Py_ssize_t i = 0; i < num_threads; i++) {
         PyObject *iter = PyLong_FromSsize_t(thread_data[i].iters);
         if (iter == NULL) {
             goto exit;
         }
         PyList_SET_ITEM(thread_iters, i, iter);
+        sum_iters += thread_data[i].iters;
     }
 
     assert(end != start);
-    double rate = total_iters * 1e9 / (end - start);
-    res = Py_BuildValue("(dO)", rate, thread_iters);
+    PyTime_t elapsed_ns = end - start;
+    double rate = sum_iters * 1e9 / elapsed_ns;
+    res = Py_BuildValue("(dOL)", rate, thread_iters,
+                        (long long)elapsed_ns);
 
 exit:
-    PyThread_free_lock(bench_data.lock);
+    PyMem_Free(bench_data);
     PyMem_Free(thread_data);
+    PyMem_Free(bg_data);
     Py_XDECREF(thread_iters);
     return res;
 }
@@ -344,7 +416,7 @@ test_lock_benchmark(PyObject *module, PyObject *obj)
 {
     // Just make sure the benchmark runs without crashing
     PyObject *res = _testinternalcapi_benchmark_locks_impl(
-        module, 1, 1, 1, 100);
+        module, 1, 1, 0, 100, 1, 0, 0, 1000, 1);
     if (res == NULL) {
         return NULL;
     }
