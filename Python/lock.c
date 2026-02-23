@@ -31,6 +31,31 @@ static const int MAX_SPIN_COUNT = 40;
 static const int MAX_SPIN_COUNT = 0;
 #endif
 
+// Per-thread spin statistics, accumulated across lock acquisitions.
+static _Py_thread_local int64_t _PyMutex_SpinTimeNs = 0;
+static _Py_thread_local int64_t _PyMutex_SpinCount = 0;
+static _Py_thread_local int64_t _PyMutex_ParkCount = 0;
+static _Py_thread_local int64_t _PyMutex_HandoffCount = 0;
+
+void
+_PyMutex_ResetSpinStats(void)
+{
+    _PyMutex_SpinTimeNs = 0;
+    _PyMutex_SpinCount = 0;
+    _PyMutex_ParkCount = 0;
+    _PyMutex_HandoffCount = 0;
+}
+
+void
+_PyMutex_GetSpinStats(int64_t *spin_time_ns, int64_t *spin_count,
+                      int64_t *park_count, int64_t *handoff_count)
+{
+    *spin_time_ns = _PyMutex_SpinTimeNs;
+    *spin_count = _PyMutex_SpinCount;
+    *park_count = _PyMutex_ParkCount;
+    *handoff_count = _PyMutex_HandoffCount;
+}
+
 struct mutex_entry {
     // The time after which the unlocking thread should hand off lock ownership
     // directly to the waiting thread. Written by the waiting thread.
@@ -79,10 +104,17 @@ _PyMutex_LockTimed(PyMutex *m, PyTime_t timeout, _PyLockFlags flags)
     };
 
     Py_ssize_t spin_count = 0;
+    int has_parked = 0;
     for (;;) {
         if ((v & _Py_LOCKED) == 0) {
             // The lock is unlocked. Try to grab it.
             if (_Py_atomic_compare_exchange_uint8(&m->_bits, &v, v|_Py_LOCKED)) {
+                if (!has_parked && spin_count > 0) {
+                    PyTime_t spin_end;
+                    (void)PyTime_MonotonicRaw(&spin_end);
+                    _PyMutex_SpinTimeNs += spin_end - now;
+                    _PyMutex_SpinCount += spin_count;
+                }
                 return PY_LOCK_ACQUIRED;
             }
             continue;
@@ -111,6 +143,14 @@ _PyMutex_LockTimed(PyMutex *m, PyTime_t timeout, _PyLockFlags flags)
             return PY_LOCK_FAILURE;
         }
 
+        if (!has_parked) {
+            PyTime_t spin_end;
+            (void)PyTime_MonotonicRaw(&spin_end);
+            _PyMutex_SpinTimeNs += spin_end - now;
+            _PyMutex_SpinCount += spin_count;
+            has_parked = 1;
+        }
+
         uint8_t newv = v;
         if (!(v & _Py_HAS_PARKED)) {
             // We are the first waiter. Set the _Py_HAS_PARKED flag.
@@ -120,10 +160,12 @@ _PyMutex_LockTimed(PyMutex *m, PyTime_t timeout, _PyLockFlags flags)
             }
         }
 
+        _PyMutex_ParkCount++;
         int ret = _PyParkingLot_Park(&m->_bits, &newv, sizeof(newv), timeout,
                                      &entry, (flags & _PY_LOCK_DETACH) != 0);
         if (ret == Py_PARK_OK) {
             if (entry.handed_off) {
+                _PyMutex_HandoffCount++;
                 // We own the lock now. thread.Lock allows other threads
                 // to concurrently release the lock so we cannot assert that
                 // it is locked if _PY_LOCK_PYTHONLOCK is set.

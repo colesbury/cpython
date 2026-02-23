@@ -210,6 +210,7 @@ struct bg_thread_data {
     Py_ssize_t bg_work;
     Py_ssize_t iters;
     PyEvent done;
+    double value;
 };
 
 static void
@@ -221,7 +222,8 @@ thread_background_work(void *arg)
     Py_ssize_t iters = 0;
     while (!_Py_atomic_load_int_relaxed(data->stop)) {
         for (Py_ssize_t i = 0; i < bg_work; i++) {
-            my_value = my_value + 1.0;
+            data->value += my_value;
+            my_value = data->value;
         }
         iters++;
     }
@@ -232,6 +234,10 @@ thread_background_work(void *arg)
 struct bench_thread_data {
     struct bench_data_locks *bench_data;
     Py_ssize_t iters;
+    int64_t spin_time_ns;
+    int64_t spin_count;
+    int64_t park_count;
+    int64_t handoff_count;
     PyEvent done;
 };
 
@@ -245,7 +251,10 @@ thread_benchmark_locks(void *arg)
     int num_acquisitions = bench_data->num_acquisitions;
     Py_ssize_t target_iters = bench_data->target_iters;
 
+    _PyMutex_ResetSpinStats();
+
     double my_value = 1.0;
+    double local_value = 0.0;
     Py_ssize_t iters = 0;
     for (;;) {
         if (target_iters > 0) {
@@ -269,12 +278,17 @@ thread_benchmark_locks(void *arg)
             PyMutex_Unlock(&bench_data->m);
         }
         for (int i = 0; i < work_outside; i++) {
-            my_value = my_value + 1.0;
+            local_value += my_value;
+            my_value = local_value;
         }
         iters += num_acquisitions;
     }
 
     thread_data->iters = iters;
+    _PyMutex_GetSpinStats(&thread_data->spin_time_ns,
+                          &thread_data->spin_count,
+                          &thread_data->park_count,
+                          &thread_data->handoff_count);
     _PyEvent_Notify(&thread_data->done);
 }
 
@@ -381,13 +395,19 @@ _testinternalcapi_benchmark_locks_impl(PyObject *module,
 
     // Stop background threads
     _Py_atomic_store_int(&bg_stop, 1);
+    Py_ssize_t bg_iters = 0;
     for (Py_ssize_t i = 0; i < num_bg_threads; i++) {
         PyEvent_Wait(&bg_data[i].done);
+        bg_iters += bg_data[i].iters;
     }
 
     // Return the total number of acquisitions, the number of acquisitions
-    // for each thread, and elapsed time.
+    // for each thread, and spin statistics.
     Py_ssize_t sum_iters = 0;
+    int64_t total_spin_time_ns = 0;
+    int64_t total_spin_count = 0;
+    int64_t total_park_count = 0;
+    int64_t total_handoff_count = 0;
     for (Py_ssize_t i = 0; i < num_threads; i++) {
         PyObject *iter = PyLong_FromSsize_t(thread_data[i].iters);
         if (iter == NULL) {
@@ -395,13 +415,19 @@ _testinternalcapi_benchmark_locks_impl(PyObject *module,
         }
         PyList_SET_ITEM(thread_iters, i, iter);
         sum_iters += thread_data[i].iters;
+        total_spin_time_ns += thread_data[i].spin_time_ns;
+        total_spin_count += thread_data[i].spin_count;
+        total_park_count += thread_data[i].park_count;
+        total_handoff_count += thread_data[i].handoff_count;
     }
 
     assert(end != start);
     PyTime_t elapsed_ns = end - start;
     double rate = sum_iters * 1e9 / elapsed_ns;
-    res = Py_BuildValue("(dOL)", rate, thread_iters,
-                        (long long)elapsed_ns);
+    res = Py_BuildValue("(dOLLLLLn)", rate, thread_iters,
+                        total_spin_time_ns, total_spin_count,
+                        total_park_count, total_handoff_count,
+                        (long long)elapsed_ns, bg_iters);
 
 exit:
     PyMem_Free(bench_data);

@@ -57,9 +57,13 @@ def main():
     header = f"{'Threads': <10}{'Acq (kHz)': >12}{'Fairness': >10}"
     if args.total_iters:
         header += f"{'Wall (ms)': >12}"
+    header += f"{'Spins': >12}{'Spin %': >10}{'ns/spin': >10}{'Parks': >10}{'Handoffs': >10}"
+    if args.bg_threads:
+        header += f"{'BG (kHz)': >12}"
     print(header)
     for num_threads in args.threads:
-        acquisitions, thread_iters, elapsed_ns = \
+        acquisitions, thread_iters, spin_time_ns, spin_count, \
+            park_count, handoff_count, elapsed_ns, bg_iters = \
             benchmark_locks(
                 num_threads, args.work_inside, args.work_outside,
                 1000, args.acquisitions, args.total_iters,
@@ -68,10 +72,17 @@ def main():
         wall_ms = elapsed_ns / 1e6
         acquisitions /= 1000  # report in kHz for readability
         fairness = jains_fairness(thread_iters)
+        spin_pct = 100.0 * spin_time_ns / elapsed_ns / num_threads
+        ns_per_spin = spin_time_ns / spin_count if spin_count else 0
 
         line = f"{num_threads: <10}{acquisitions: >12.0f}{fairness: >10.2f}"
         if args.total_iters:
             line += f"{wall_ms: >12.1f}"
+        line += f"{spin_count: >12}{spin_pct: >9.1f}%{ns_per_spin: >10.0f}"
+        line += f"{park_count: >10}{handoff_count: >10}"
+        if args.bg_threads:
+            bg_rate = bg_iters * 1e6 / elapsed_ns  # kHz
+            line += f"{bg_rate: >12.0f}"
         print(line)
 
 

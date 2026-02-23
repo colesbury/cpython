@@ -51,6 +51,14 @@ typedef enum _PyLockFlags {
     _PY_LOCK_PYTHONLOCK = 8,
 } _PyLockFlags;
 
+// Per-thread spin statistics (thread-local). Use the accessor functions
+// from other compilation units.
+extern PyAPI_FUNC(void) _PyMutex_ResetSpinStats(void);
+extern PyAPI_FUNC(void) _PyMutex_GetSpinStats(int64_t *spin_time_ns,
+                                               int64_t *spin_count,
+                                               int64_t *park_count,
+                                               int64_t *handoff_count);
+
 // Lock a mutex with an optional timeout and additional options. See
 // _PyLockFlags for details.
 extern PyAPI_FUNC(PyLockStatus)
