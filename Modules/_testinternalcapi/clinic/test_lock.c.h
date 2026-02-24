@@ -148,4 +148,51 @@ skip_optional:
 exit:
     return return_value;
 }
-/*[clinic end generated code: output=3b306045bb906459 input=a9049054013a1b77]*/
+
+PyDoc_STRVAR(_testinternalcapi_benchmark_parking_lot__doc__,
+"benchmark_parking_lot($module, iterations=10000, warmup=500, /)\n"
+"--\n"
+"\n"
+"Measure the round-trip cost of ParkingLot park + unpark.\n"
+"\n"
+"Two threads ping-pong via ParkingLot. Returns a list of round-trip\n"
+"times in nanoseconds.");
+
+#define _TESTINTERNALCAPI_BENCHMARK_PARKING_LOT_METHODDEF    \
+    {"benchmark_parking_lot", _PyCFunction_CAST(_testinternalcapi_benchmark_parking_lot), METH_FASTCALL, _testinternalcapi_benchmark_parking_lot__doc__},
+
+static PyObject *
+_testinternalcapi_benchmark_parking_lot_impl(PyObject *module,
+                                             int iterations, int warmup);
+
+static PyObject *
+_testinternalcapi_benchmark_parking_lot(PyObject *module, PyObject *const *args, Py_ssize_t nargs)
+{
+    PyObject *return_value = NULL;
+    int iterations = 10000;
+    int warmup = 500;
+
+    if (!_PyArg_CheckPositional("benchmark_parking_lot", nargs, 0, 2)) {
+        goto exit;
+    }
+    if (nargs < 1) {
+        goto skip_optional;
+    }
+    iterations = PyLong_AsInt(args[0]);
+    if (iterations == -1 && PyErr_Occurred()) {
+        goto exit;
+    }
+    if (nargs < 2) {
+        goto skip_optional;
+    }
+    warmup = PyLong_AsInt(args[1]);
+    if (warmup == -1 && PyErr_Occurred()) {
+        goto exit;
+    }
+skip_optional:
+    return_value = _testinternalcapi_benchmark_parking_lot_impl(module, iterations, warmup);
+
+exit:
+    return return_value;
+}
+/*[clinic end generated code: output=cea0fdb7d6e13537 input=a9049054013a1b77]*/

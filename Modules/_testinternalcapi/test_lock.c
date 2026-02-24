@@ -2,6 +2,7 @@
 
 #include "parts.h"
 #include "pycore_lock.h"
+#include "pycore_parking_lot.h"
 #include "pycore_pythread.h"      // PyThread_get_thread_ident_ex()
 
 #include "clinic/test_lock.c.h"
@@ -437,6 +438,163 @@ exit:
     return res;
 }
 
+/*
+ * Measure the round-trip cost of ParkingLot park + unpark.
+ *
+ * Two threads ping-pong via ParkingLot: the waiter parks on an address,
+ * the waker unparks, and we measure the round-trip time. Half the
+ * round-trip is one "T_sleep" (time to put a thread to sleep and wake it).
+ */
+
+struct parking_lot_bench_data {
+    int val;                /* ping-pong state */
+    char _padding[60];      /* separate val from other fields */
+    int iterations;
+};
+
+struct parking_lot_thread_args {
+    struct parking_lot_bench_data *bench;
+    int wait_value;         /* value to wait for */
+    int set_value;          /* value to set after waking */
+    PyTime_t *wait_samples;   /* park wait times (ns), or NULL */
+    PyTime_t *unpark_samples; /* store+unpark times (ns), or NULL */
+    PyEvent done;
+};
+
+static void
+parking_lot_thread(void *arg)
+{
+    struct parking_lot_thread_args *targs = arg;
+    struct parking_lot_bench_data *data = targs->bench;
+    int wait_value = targs->wait_value;
+    int set_value = targs->set_value;
+    PyTime_t *wait_samples = targs->wait_samples;
+    PyTime_t *unpark_samples = targs->unpark_samples;
+    int iters = data->iterations;
+
+    for (int i = 0; i < iters; i++) {
+        PyTime_t t0;
+        if (wait_samples) {
+            PyTime_MonotonicRaw(&t0);
+        }
+
+        while (_Py_atomic_load_int_relaxed(&data->val) != wait_value) {
+            int expected = set_value;
+            _PyParkingLot_Park(&data->val, &expected,
+                               sizeof(data->val), -1, NULL, 0);
+        }
+
+        PyTime_t t1;
+        if (wait_samples) {
+            PyTime_MonotonicRaw(&t1);
+            wait_samples[i] = t1 - t0;
+        }
+
+        _Py_atomic_store_int(&data->val, set_value);
+        _PyParkingLot_UnparkAll(&data->val);
+
+        if (unpark_samples) {
+            PyTime_t t2;
+            PyTime_MonotonicRaw(&t2);
+            unpark_samples[i] = t2 - t1;
+        }
+    }
+
+    _PyEvent_Notify(&targs->done);
+}
+
+/*[clinic input]
+_testinternalcapi.benchmark_parking_lot
+
+    iterations: int = 10000
+    warmup: int = 500
+    /
+
+Measure the round-trip cost of ParkingLot park + unpark.
+
+Two threads ping-pong via ParkingLot. Returns a list of round-trip
+times in nanoseconds.
+[clinic start generated code]*/
+
+static PyObject *
+_testinternalcapi_benchmark_parking_lot_impl(PyObject *module,
+                                             int iterations, int warmup)
+/*[clinic end generated code: output=92a3d265eb75baa1 input=7326ce1a7c9a8f0b]*/
+{
+    PyTime_t *wait_samples = NULL;
+    PyTime_t *unpark_samples = NULL;
+    PyObject *wait_list = NULL;
+    PyObject *unpark_list = NULL;
+    PyObject *result = NULL;
+
+    /* Warmup phase */
+    struct parking_lot_bench_data warmup_bench = {0};
+    warmup_bench.iterations = warmup;
+
+    struct parking_lot_thread_args warmup_a = {
+        .bench = &warmup_bench, .wait_value = 0, .set_value = 1,
+    };
+    struct parking_lot_thread_args warmup_b = {
+        .bench = &warmup_bench, .wait_value = 1, .set_value = 0,
+    };
+
+    PyThread_start_new_thread(parking_lot_thread, &warmup_b);
+    PyThread_start_new_thread(parking_lot_thread, &warmup_a);
+    PyEvent_Wait(&warmup_a.done);
+    PyEvent_Wait(&warmup_b.done);
+
+    /* Actual benchmark */
+    wait_samples = PyMem_Calloc(iterations, sizeof(PyTime_t));
+    unpark_samples = PyMem_Calloc(iterations, sizeof(PyTime_t));
+    if (wait_samples == NULL || unpark_samples == NULL) {
+        PyErr_NoMemory();
+        goto exit;
+    }
+
+    struct parking_lot_bench_data bench = {0};
+    bench.iterations = iterations;
+
+    struct parking_lot_thread_args thread_a = {
+        .bench = &bench, .wait_value = 0, .set_value = 1,
+        .wait_samples = wait_samples, .unpark_samples = unpark_samples,
+    };
+    struct parking_lot_thread_args thread_b = {
+        .bench = &bench, .wait_value = 1, .set_value = 0,
+    };
+
+    PyThread_start_new_thread(parking_lot_thread, &thread_b);
+    PyThread_start_new_thread(parking_lot_thread, &thread_a);
+    PyEvent_Wait(&thread_a.done);
+    PyEvent_Wait(&thread_b.done);
+
+    /* Build result lists */
+    wait_list = PyList_New(iterations);
+    unpark_list = PyList_New(iterations);
+    if (wait_list == NULL || unpark_list == NULL) {
+        goto exit;
+    }
+    for (int i = 0; i < iterations; i++) {
+        PyObject *w = PyLong_FromLongLong(wait_samples[i]);
+        PyObject *u = PyLong_FromLongLong(unpark_samples[i]);
+        if (w == NULL || u == NULL) {
+            Py_XDECREF(w);
+            Py_XDECREF(u);
+            goto exit;
+        }
+        PyList_SET_ITEM(wait_list, i, w);
+        PyList_SET_ITEM(unpark_list, i, u);
+    }
+
+    result = PyTuple_Pack(2, wait_list, unpark_list);
+
+exit:
+    PyMem_Free(wait_samples);
+    PyMem_Free(unpark_samples);
+    Py_XDECREF(wait_list);
+    Py_XDECREF(unpark_list);
+    return result;
+}
+
 static PyObject *
 test_lock_benchmark(PyObject *module, PyObject *obj)
 {
@@ -608,6 +766,7 @@ static PyMethodDef test_methods[] = {
     {"test_lock_counter", test_lock_counter, METH_NOARGS},
     {"test_lock_counter_slow", test_lock_counter_slow, METH_NOARGS},
     _TESTINTERNALCAPI_BENCHMARK_LOCKS_METHODDEF
+    _TESTINTERNALCAPI_BENCHMARK_PARKING_LOT_METHODDEF
     {"test_lock_benchmark", test_lock_benchmark, METH_NOARGS},
     {"test_lock_once", test_lock_once, METH_NOARGS},
     {"test_lock_rwlock", test_lock_rwlock, METH_NOARGS},
