@@ -24,6 +24,9 @@
 #include "pycore_weakref.h"       // _PyWeakref_GET_REF()
 #include "pycore_cell.h"          // PyCell_GetRef()
 #include "pycore_stats.h"
+#ifdef Py_GIL_DISABLED
+#include "pycore_mrocache.h"     // _Py_mro_cache_*
+#endif
 #include "opcode.h"               // MAKE_CELL
 
 #include <stddef.h>               // ptrdiff_t
@@ -1117,6 +1120,9 @@ type_modified_unlocked(PyTypeObject *type)
         }
     }
 
+#ifdef Py_GIL_DISABLED
+    _Py_mro_cache_erase(type);
+#endif
     set_version_unlocked(type, 0); /* 0 is not a valid version tag */
     if (PyType_HasFeature(type, Py_TPFLAGS_HEAPTYPE)) {
         // This field *must* be invalidated if the type is modified (see the
@@ -5794,6 +5800,23 @@ _PyType_LookupRefAndVersion(PyTypeObject *type, PyObject *name, unsigned int *ve
 unsigned int
 _PyType_LookupStackRefAndVersion(PyTypeObject *type, PyObject *name, _PyStackRef *out)
 {
+#ifdef Py_GIL_DISABLED
+    /* Per-type MRO cache: check before the global cache */
+    if (MCACHE_CACHEABLE_NAME(name)) {
+        PyObject *mro_result;
+        if (_Py_mro_cache_lookup_acq(type, name, &mro_result)) {
+            OBJECT_STAT_INC_COND(type_cache_hits, !is_dunder_name(name));
+            OBJECT_STAT_INC_COND(type_cache_dunder_hits, is_dunder_name(name));
+            if (mro_result != NULL) {
+                *out = PyStackRef_FromPyObjectSteal(mro_result);
+            }
+            else {
+                *out = PyStackRef_NULL;
+            }
+            return FT_ATOMIC_LOAD_UINT32_RELAXED(type->tp_version_tag);
+        }
+    }
+#endif
     unsigned int h = MCACHE_HASH_METHOD(type, name);
     struct type_cache *cache = get_type_cache();
     struct type_cache_entry *entry = &cache->hashtable[h];
@@ -5856,6 +5879,11 @@ _PyType_LookupStackRefAndVersion(PyTypeObject *type, PyObject *name, _PyStackRef
         assigned_version = type->tp_version_tag;
     }
     res = find_name_in_mro(type, name, &error);
+#ifdef Py_GIL_DISABLED
+    if (!error && MCACHE_CACHEABLE_NAME(name)) {
+        _Py_mro_cache_insert(type, name, res);
+    }
+#endif
     END_TYPE_LOCK();
 
     /* Only put NULL results into cache if there was no error. */
@@ -6334,6 +6362,9 @@ fini_static_type(PyInterpreterState *interp, PyTypeObject *type,
 
     if (final) {
         BEGIN_TYPE_LOCK();
+#ifdef Py_GIL_DISABLED
+        _Py_mro_cache_fini(type);
+#endif
         type_clear_flags(type, Py_TPFLAGS_READY);
         set_version_unlocked(type, 0);
         END_TYPE_LOCK();
@@ -6378,6 +6409,10 @@ type_dealloc(PyObject *self)
 
     _PyObject_GC_UNTRACK(type);
     type_dealloc_common(type);
+
+#ifdef Py_GIL_DISABLED
+    _Py_mro_cache_fini(type);
+#endif
 
     // PyObject_ClearWeakRefs() raises an exception if Py_REFCNT() != 0
     assert(Py_REFCNT(type) == 0);
@@ -8908,6 +8943,10 @@ type_ready(PyTypeObject *type, int initial)
             goto error;
         }
     }
+
+#ifdef Py_GIL_DISABLED
+    _Py_mro_cache_init(type);
+#endif
 
     /* All done -- set the ready flag */
     if (initial) {

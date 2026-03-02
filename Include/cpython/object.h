@@ -239,6 +239,13 @@ struct _typeobject {
      * Otherwise, limited to MAX_VERSIONS_PER_CLASS (defined elsewhere).
      */
     uint16_t tp_versions_used;
+
+#ifdef Py_GIL_DISABLED
+    /* Per-type MRO attribute cache (open-addressed hash table).
+     * Points to a _Py_mro_cache_buckets struct.  Lock-free reads;
+     * writes under TYPE_LOCK.  See pycore_mrocache.h. */
+    void *_tp_mro_cache;
+#endif
 };
 
 #define _Py_ATTR_CACHE_UNUSED (30000)  // (see tp_versions_used)
