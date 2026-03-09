@@ -242,6 +242,20 @@ def instantiate_typing_namedtuple():
         obj = MyTypingNamedTuple(x=1, y=2, z=3)
 
 
+class Base:
+    def method(self):
+        return 1
+
+class Derived(Base):
+    def method(self):
+        return super().method()
+
+@register_benchmark
+def super_call():
+    obj = Derived()
+    for _ in range(1000 * WORK_SCALE):
+        obj.method()
+
 @register_benchmark
 def deepcopy():
     x = {'list': [1, 2], 'tuple': (1, None)}
