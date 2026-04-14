@@ -271,6 +271,26 @@ class TestRaces(TestBase):
 
         do_race(set_value, mutate)
 
+    def test_intentional_race_for_tsan(self):
+        # Intentionally trigger a C-level data race to verify that
+        # ThreadSanitizer is wired up correctly. This test should FAIL
+        # (or report a race) under TSan and pass otherwise.
+        import ctypes
+
+        shared = (ctypes.c_int * 1)(0)
+        addr = ctypes.addressof(shared)
+
+        def writer():
+            for i in range(1000):
+                ctypes.memmove(addr, (ctypes.c_int * 1)(i), ctypes.sizeof(ctypes.c_int))
+
+        def reader():
+            buf = (ctypes.c_int * 1)(0)
+            for _ in range(1000):
+                ctypes.memmove(buf, addr, ctypes.sizeof(ctypes.c_int))
+
+        do_race(writer, reader)
+
     def test_racing_recursion_limit(self):
         def something_recursive():
             def count(n):
