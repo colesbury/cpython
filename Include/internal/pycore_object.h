@@ -314,7 +314,9 @@ _Py_THREAD_INCREF_OBJECT(PyObject *obj, Py_ssize_t unique_id)
     // The table index is `unique_id - 1` because 0 is not a valid unique id.
     // Unsigned comparison so that `idx=-1` is handled by the "else".
     size_t idx = (size_t)(unique_id - 1);
-    if (idx < (size_t)tstate->refcounts.size) {
+    if (idx < (size_t)tstate->refcounts.size &&
+        tstate->refcounts.values[idx] != INT16_MAX)
+    {
 #  ifdef Py_REF_DEBUG
         _Py_INCREF_IncRefTotal();
 #  endif
@@ -322,7 +324,8 @@ _Py_THREAD_INCREF_OBJECT(PyObject *obj, Py_ssize_t unique_id)
         tstate->refcounts.values[idx]++;
     }
     else {
-        // The slow path resizes the per-thread refcount array if necessary.
+        // The slow path resizes the per-thread refcount array if necessary
+        // and flushes the entry to the shared refcount if it would overflow.
         // It handles the unique_id=0 case to keep the inlinable function smaller.
         _PyObject_ThreadIncrefSlow(obj, idx);
     }
@@ -364,7 +367,9 @@ _Py_THREAD_DECREF_OBJECT(PyObject *obj, Py_ssize_t unique_id)
     // The table index is `unique_id - 1` because 0 is not a valid unique id.
     // Unsigned comparison so that `idx=-1` is handled by the "else".
     size_t idx = (size_t)(unique_id - 1);
-    if (idx < (size_t)tstate->refcounts.size) {
+    if (idx < (size_t)tstate->refcounts.size &&
+        tstate->refcounts.values[idx] != INT16_MIN)
+    {
 #  ifdef Py_REF_DEBUG
         _Py_DECREF_DecRefTotal();
 #  endif
@@ -372,9 +377,9 @@ _Py_THREAD_DECREF_OBJECT(PyObject *obj, Py_ssize_t unique_id)
         tstate->refcounts.values[idx]--;
     }
     else {
-        // Directly decref the object if the id is not assigned or if
-        // per-thread refcounting has been disabled on this object.
-        Py_DECREF(obj);
+        // The slow path flushes the entry to the shared refcount if it would
+        // underflow, and otherwise decrefs the object directly.
+        _PyObject_ThreadDecrefSlow(obj, idx);
     }
 }
 

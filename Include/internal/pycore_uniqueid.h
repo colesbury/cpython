@@ -47,7 +47,11 @@ extern void _PyObject_FinalizePerThreadRefcounts(_PyThreadStateImpl *tstate);
 extern void _PyObject_FinalizeUniqueIdPool(PyInterpreterState *interp);
 
 // Increfs the object, resizing the thread-local refcount array if necessary.
+// Flushes the thread-local refcount if it would overflow.
 PyAPI_FUNC(void) _PyObject_ThreadIncrefSlow(PyObject *obj, size_t idx);
+
+// Decrefs the object. Flushes the thread-local refcount if it would underflow.
+PyAPI_FUNC(void) _PyObject_ThreadDecrefSlow(PyObject *obj, size_t idx);
 
 #endif   /* Py_GIL_DISABLED */
 

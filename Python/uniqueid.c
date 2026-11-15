@@ -60,15 +60,15 @@ resize_local_refcounts(_PyThreadStateImpl *tstate)
     struct _Py_unique_id_pool *pool = &tstate->base.interp->unique_ids;
     Py_ssize_t size = _Py_atomic_load_ssize(&pool->size);
 
-    Py_ssize_t *refcnts = PyMem_Realloc(tstate->refcounts.values,
-                                        size * sizeof(Py_ssize_t));
+    int16_t *refcnts = PyMem_Realloc(tstate->refcounts.values,
+                                     size * sizeof(*refcnts));
     if (refcnts == NULL) {
         return -1;
     }
 
     Py_ssize_t old_size = tstate->refcounts.size;
     if (old_size < size) {
-       memset(refcnts + old_size, 0, (size - old_size) * sizeof(Py_ssize_t));
+       memset(refcnts + old_size, 0, (size - old_size) * sizeof(*refcnts));
     }
 
     tstate->refcounts.values = refcnts;
@@ -149,22 +149,60 @@ _PyObject_DisablePerThreadRefcounting(PyObject *obj)
     }
 }
 
+// Adds a thread-local refcount delta to the object's shared refcount.
+static inline void
+merge_refcount(PyObject *obj, Py_ssize_t refcnt)
+{
+    _Py_atomic_add_ssize(&obj->ob_ref_shared, refcnt << _Py_REF_SHARED_SHIFT);
+}
+
 void
 _PyObject_ThreadIncrefSlow(PyObject *obj, size_t idx)
 {
     _PyThreadStateImpl *tstate = (_PyThreadStateImpl *)_PyThreadState_GET();
-    if (((Py_ssize_t)idx) < 0 || resize_local_refcounts(tstate) < 0) {
+    if (((Py_ssize_t)idx) < 0 ||
+        (idx >= (size_t)tstate->refcounts.size &&
+         resize_local_refcounts(tstate) < 0))
+    {
         // just incref the object directly.
         Py_INCREF(obj);
         return;
     }
 
     assert(idx < (size_t)tstate->refcounts.size);
-    tstate->refcounts.values[idx]++;
+    int16_t *refcnt = &tstate->refcounts.values[idx];
+    if (*refcnt == INT16_MAX) {
+        // Flush this entry to the shared refcount to avoid overflow.
+        merge_refcount(obj, *refcnt);
+        *refcnt = 0;
+    }
+    (*refcnt)++;
 #ifdef Py_REF_DEBUG
     _Py_IncRefTotal((PyThreadState *)tstate);
 #endif
     _Py_INCREF_STAT_INC();
+}
+
+void
+_PyObject_ThreadDecrefSlow(PyObject *obj, size_t idx)
+{
+    _PyThreadStateImpl *tstate = (_PyThreadStateImpl *)_PyThreadState_GET();
+    if (idx >= (size_t)tstate->refcounts.size) {
+        // Directly decref the object if the id is not assigned or if
+        // per-thread refcounting has been disabled on this object.
+        Py_DECREF(obj);
+        return;
+    }
+
+    // Flush this entry to the shared refcount to avoid underflow.
+    int16_t *refcnt = &tstate->refcounts.values[idx];
+    assert(*refcnt == INT16_MIN);
+    merge_refcount(obj, *refcnt);
+    *refcnt = -1;
+#ifdef Py_REF_DEBUG
+    _Py_DecRefTotal((PyThreadState *)tstate);
+#endif
+    _Py_DECREF_STAT_INC();
 }
 
 void
@@ -180,9 +218,7 @@ _PyObject_MergePerThreadRefcounts(_PyThreadStateImpl *tstate)
     for (Py_ssize_t i = 0, n = tstate->refcounts.size; i < n; i++) {
         Py_ssize_t refcnt = tstate->refcounts.values[i];
         if (refcnt != 0) {
-            PyObject *obj = pool->table[i].obj;
-            _Py_atomic_add_ssize(&obj->ob_ref_shared,
-                                 refcnt << _Py_REF_SHARED_SHIFT);
+            merge_refcount(pool->table[i].obj, refcnt);
             tstate->refcounts.values[i] = 0;
         }
     }

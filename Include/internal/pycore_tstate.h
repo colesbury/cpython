@@ -76,8 +76,10 @@ typedef struct _PyThreadStateImpl {
     struct _Py_freelists freelists;
     struct _brc_thread_state brc;
     struct {
-        // The per-thread refcounts
-        Py_ssize_t *values;
+        // The per-thread refcounts. These are deltas relative to the
+        // object's shared refcount. They are kept small to save memory and
+        // flushed to ob_ref_shared when they would overflow.
+        int16_t *values;
 
         // Size of the refcounts array.
         Py_ssize_t size;
