@@ -8,6 +8,7 @@
 #include "pycore_initconfig.h"    // _PyStatus_OK()
 #include "pycore_interp.h"        // PyInterpreterState.co_extra_freefuncs
 #include "pycore_interpframe.h"   // FRAME_SPECIALS_SIZE
+#include "pycore_object_deferred.h" // _PyObject_SetDeferredRefcount()
 #include "pycore_opcode_metadata.h" // _PyOpcode_Caches
 #include "pycore_opcode_utils.h"  // RESUME_AT_FUNC_START
 #include "pycore_optimizer.h"     // _Py_ExecutorDetach
@@ -758,7 +759,15 @@ _PyCode_New(struct _PyCodeConstructor *con)
     }
 
 #ifdef Py_GIL_DISABLED
-    co->_co_unique_id = _PyObject_AssignUniqueId((PyObject *)co);
+    // gh-161998: Only nested functions are created repeatedly, so only
+    // nested code objects benefit from per-thread refcounting.
+    if (co->co_flags & CO_NESTED) {
+        co->_co_unique_id = _PyObject_AssignUniqueId((PyObject *)co);
+    }
+    else {
+        // Frames still reference the code object, so use deferred refcounting.
+        _PyObject_SetDeferredRefcount((PyObject *)co);
+    }
     _PyObject_GC_TRACK(co);
 #endif
     Py_XDECREF(replacement_locations);
